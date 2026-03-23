@@ -3,18 +3,17 @@ import torch
 
 def accuracy(output, target):
     with torch.no_grad():
-        pred = torch.argmax(output, dim=1)
-        assert pred.shape[0] == len(target)
-        correct = 0
-        correct += torch.sum(pred == target).item()
-    return correct / len(target)
+        pred = (torch.sigmoid(output) > 0.5).float()
+        correct = torch.sum(pred == target).item()
+    return correct / target.numel()
 
 
-def top_k_acc(output, target, k=3):
+def pct_low_accuracy_tiles(output, target, threshold=0.25):
     with torch.no_grad():
-        pred = torch.topk(output, k, dim=1)[1]
-        assert pred.shape[0] == len(target)
-        correct = 0
-        for i in range(k):
-            correct += torch.sum(pred[:, i] == target).item()
-    return correct / len(target)
+        pred = (torch.sigmoid(output) > 0.5).float()
+        batch_size = target.shape[0]
+        pred_flat = pred.view(batch_size, -1)
+        target_flat = target.view(batch_size, -1)
+        per_tile_acc = (pred_flat == target_flat).float().mean(dim=1)
+        low_acc_count = (per_tile_acc < threshold).sum().item()
+    return low_acc_count / batch_size
