@@ -19,7 +19,7 @@
     "optimizer": {
         "type": "Adam",
         "args":{
-            "lr": 5e-2,
+            "lr": 1e-4,
             "weight_decay": 0,
             "amsgrad": true
         }
@@ -31,7 +31,7 @@
     "lr_scheduler": {
         "type": "StepLR",
         "args": {
-            "step_size": 500,
+            "step_size": 1500,
             "gamma": 1.0
         }
     },
@@ -45,7 +45,7 @@
     },
 
     "trainer": {
-        "epochs": 500,
+        "epochs": 1500,
 
         "save_dir": "saved/",
         "save_period": 100,
