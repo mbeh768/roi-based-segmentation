@@ -7,6 +7,12 @@ def accuracy(output, target):
         correct = torch.sum(pred == target).item()
     return correct / target.numel()
 
+def iou(output, target, eps=1e-6):
+    with torch.no_grad():
+        pred = (torch.sigmoid(output) > 0.5).float()
+        intersection = (pred * target).sum()
+        union = pred.sum() + target.sum() - intersection
+        return ((intersection + eps) / (union + eps)).item()
 
 def pct_low_accuracy_tiles(output, target, threshold=0.25):
     with torch.no_grad():
