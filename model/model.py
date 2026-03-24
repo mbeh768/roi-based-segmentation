@@ -148,11 +148,13 @@ class DualBranchSegmentation(BaseModel):
         bb = resnet50(weights=ResNet50_Weights.DEFAULT if pretrained else None)
 
         # shared encoder — split into stages so local branch can expose skip features
-        self.enc_stem   = nn.Sequential(bb.conv1, bb.bn1, bb.relu, bb.maxpool)
-        self.enc_layer1 = bb.layer1   # → (B,  256, H/4,  W/4)
-        self.enc_layer2 = bb.layer2   # → (B,  512, H/8,  W/8)
-        self.enc_layer3 = bb.layer3   # → (B, 1024, H/16, W/16)
-        self.enc_layer4 = bb.layer4   # → (B, 2048, H/32, W/32)
+        # stem split before maxpool to get a H/2 skip for dec4
+        self.enc_pre    = nn.Sequential(bb.conv1, bb.bn1, bb.relu)  # → (B,  64, H/2, W/2)
+        self.enc_pool   = bb.maxpool                                 # → (B,  64, H/4, W/4)
+        self.enc_layer1 = bb.layer1                                  # → (B, 256, H/4, W/4)
+        self.enc_layer2 = bb.layer2                                  # → (B, 512, H/8, W/8)
+        self.enc_layer3 = bb.layer3                                  # → (B,1024, H/16,W/16)
+        self.enc_layer4 = bb.layer4                                  # → (B,2048, H/32,W/32)
 
         if freeze_encoder:
             for m in self._encoder_stages():
@@ -168,26 +170,28 @@ class DualBranchSegmentation(BaseModel):
         )
 
         # decoder with skip connections from local encoder
-        # skip channels: layer3=1024, layer2=512, layer1=256, stem=64
+        # skips: s3=layer3(1024@H/16), s2=layer2(512@H/8),
+        #        s1=layer1(256@H/4),   s_pre=pre-pool(64@H/2)
         self.dec1 = _DecoderBlock(2048, 1024, skip_ch=1024)  # → H/16
         self.dec2 = _DecoderBlock(1024,  512, skip_ch=512)   # → H/8
         self.dec3 = _DecoderBlock( 512,  256, skip_ch=256)   # → H/4
-        self.dec4 = _DecoderBlock( 256,  128, skip_ch=64)    # → H/2
+        self.dec4 = _DecoderBlock( 256,  128, skip_ch=64)    # → H/2  (s_pre)
         self.dec5 = _DecoderBlock( 128,   64)                 # → H
 
         self.head = nn.Conv2d(64, num_classes, kernel_size=1)
 
     def _encoder_stages(self):
-        return [self.enc_stem, self.enc_layer1,
+        return [self.enc_pre, self.enc_pool, self.enc_layer1,
                 self.enc_layer2, self.enc_layer3, self.enc_layer4]
 
     def _encode(self, x):
-        s0 = self.enc_stem(x)
-        s1 = self.enc_layer1(s0)
-        s2 = self.enc_layer2(s1)
-        s3 = self.enc_layer3(s2)
-        s4 = self.enc_layer4(s3)
-        return s4, (s0, s1, s2, s3)
+        s_pre = self.enc_pre(x)          # (B,  64, H/2,  W/2)
+        s0    = self.enc_pool(s_pre)     # (B,  64, H/4,  W/4)
+        s1    = self.enc_layer1(s0)      # (B, 256, H/4,  W/4)
+        s2    = self.enc_layer2(s1)      # (B, 512, H/8,  W/8)
+        s3    = self.enc_layer3(s2)      # (B,1024, H/16, W/16)
+        s4    = self.enc_layer4(s3)      # (B,2048, H/32, W/32)
+        return s4, (s_pre, s1, s2, s3)
 
     def train(self, mode=True):
         super().train(mode)
@@ -212,11 +216,11 @@ class DualBranchSegmentation(BaseModel):
         x = self.channel_attn(x)
         x = self.fuse(x)                                 # (B,2048,h,w)
 
-        s0, s1, s2, s3 = local_skips
-        x = self.dec1(x,  s3)   # (B,1024,H/16)
-        x = self.dec2(x,  s2)   # (B, 512,H/8)
-        x = self.dec3(x,  s1)   # (B, 256,H/4)
-        x = self.dec4(x,  s0)   # (B, 128,H/2)
+        s_pre, s1, s2, s3 = local_skips
+        x = self.dec1(x,   s3)    # (B,1024,H/16)
+        x = self.dec2(x,   s2)    # (B, 512,H/8)
+        x = self.dec3(x,   s1)    # (B, 256,H/4)
+        x = self.dec4(x,   s_pre) # (B, 128,H/2)
         x = self.dec5(x)         # (B,  64,H)
         return self.head(x)      # (B,num_classes,H,W)
 
