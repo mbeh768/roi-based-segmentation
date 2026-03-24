@@ -1,18 +1,18 @@
 {
-    "name": "VentricleSegmentation",
+    "name": "overfitting_experiment",
     "n_gpu": 1,
 
     "arch": {
-        "type": "ResNetSegmentation",
-        "args": {"num_classes": 1}
+        "type": "DualBranchSegmentation",
+        "args": {"num_classes": 1, "freeze_encoder": false}
     },
     "data_loader": {
         "type": "VentricleDataLoader",
         "args":{
             "data_dir": "data/",
-            "batch_size": 4,
+            "batch_size": 20,
             "shuffle": true,
-            "validation_split": 0.1,
+            "validation_split": 0.0,
             "num_workers": 2
         }
     },
@@ -31,21 +31,24 @@
     "lr_scheduler": {
         "type": "CosineAnnealingLR",
         "args": {
-            "T_max": 150,
-            "eta_min": 1e-4
+            "T_max": 1000,
+            "eta_min": 5e-4
         }
     },
     "preprocess": {
         "raw_image_directory": "/media/max/2TBHDD/Max B_files_from Behfar_Shared folder/Segmentation_Project/RGB FULL - dataset/",
         "downsample": 256,
-        "czi_max_px": 5000000000
+        "czi_max_px": 5000000000,
+        "tiling_size": 2048,
+        "tile_size": 256,
+        "stride": 256
     },
 
     "trainer": {
-        "epochs": 100,
+        "epochs": 100000,
 
         "save_dir": "saved/",
-        "save_period": 1,
+        "save_period": 1000,
         "verbosity": 2,
 
         "monitor": "min val_loss",

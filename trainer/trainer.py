@@ -39,11 +39,12 @@ class Trainer(BaseTrainer):
         """
         self.model.train()
         self.train_metrics.reset()
-        for batch_idx, (data, target) in enumerate(self.data_loader):
-            data, target = data.to(self.device), target.to(self.device)
+        for batch_idx, (*inputs, target) in enumerate(self.data_loader):
+            inputs = [x.to(self.device) for x in inputs]
+            target = target.to(self.device)
 
             self.optimizer.zero_grad()
-            output = self.model(data)
+            output = self.model(*inputs)
             loss = self.criterion(output, target)
             loss.backward()
             self.optimizer.step()
@@ -58,7 +59,7 @@ class Trainer(BaseTrainer):
                     epoch,
                     self._progress(batch_idx),
                     loss.item()))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                self.writer.add_image('input', make_grid(inputs[0].cpu(), nrow=8, normalize=True))
 
             if batch_idx == self.len_epoch:
                 break
