@@ -25,10 +25,10 @@ class _DecoderBlock(nn.Module):
 def _double_conv(in_ch, out_ch):
     return nn.Sequential(
         nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=False),
-        nn.BatchNorm2d(out_ch),
+        nn.GroupNorm(out_ch, out_ch),
         nn.ReLU(inplace=True),
         nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
-        nn.BatchNorm2d(out_ch),
+        nn.GroupNorm(out_ch, out_ch),
         nn.ReLU(inplace=True),
     )
 
