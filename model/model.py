@@ -6,17 +6,20 @@ from base import BaseModel
 
 
 class _DecoderBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, skip_ch=0):
         super().__init__()
-        self.block = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=False),
+        self.up   = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch + skip_ch, out_ch, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
         )
 
-    def forward(self, x):
-        return self.block(x)
+    def forward(self, x, skip=None):
+        x = self.up(x)
+        if skip is not None:
+            x = torch.cat([x, skip], dim=1)
+        return self.conv(x)
 
 
 class ResNetSegmentation(BaseModel):
@@ -107,29 +110,33 @@ class _ChannelAttention(nn.Module):
         return x * scale.view(B, C, 1, 1)
 
 
-def _make_encoder(pretrained=True, freeze=False):
-    backbone = resnet50(weights=ResNet50_Weights.DEFAULT if pretrained else None)
-    enc = nn.Sequential(
-        backbone.conv1,
-        backbone.bn1,
-        backbone.relu,
-        backbone.maxpool,
-        backbone.layer1,
-        backbone.layer2,
-        backbone.layer3,
-        backbone.layer4,
-    )
-    if freeze:
-        enc.requires_grad_(False)
-    return enc
+def _make_region_bias(pos, h, w, device):
+    """
+    Gaussian heatmap (B, 1, h, w) centred on the tile's region in the global feature map.
+    pos: (B, 4) = [y0, x0, y1, x1] normalised to [0, 1]
+    """
+    B = pos.shape[0]
+    ys = torch.linspace(0, 1, h, device=device).view(1, h, 1)
+    xs = torch.linspace(0, 1, w, device=device).view(1, 1, w)
+    cy = ((pos[:, 0] + pos[:, 2]) / 2).view(B, 1, 1)
+    cx = ((pos[:, 1] + pos[:, 3]) / 2).view(B, 1, 1)
+    sy = ((pos[:, 2] - pos[:, 0]) / 2).clamp(min=1.0 / h).view(B, 1, 1)
+    sx = ((pos[:, 3] - pos[:, 1]) / 2).clamp(min=1.0 / w).view(B, 1, 1)
+    gauss = torch.exp(-0.5 * (((ys - cy) / sy) ** 2 + ((xs - cx) / sx) ** 2))
+    return gauss.unsqueeze(1)   # (B, 1, h, w)
 
 
 class DualBranchSegmentation(BaseModel):
     """
-    Shared ResNet-50 encoder processes both a local tile and a downsampled global
-    image. Spatial cross-attention localises the global context to the tile region,
-    SE channel attention re-weights the concatenated features, a 1×1 fuse conv
-    reduces channels, and a shallow decoder up-samples to the input resolution.
+    Shared ResNet-50 encoder processes a local tile and a downsampled global image.
+
+    - A Gaussian regional bias focuses the global feature map on the tile's location.
+    - Cross-channel attention (global → local) selects which local channels matter.
+    - SE channel attention re-weights the concatenated 4096-ch features.
+    - A 1×1 fuse conv reduces to 2048.
+    - Decoder with U-Net skip connections from the local encoder stages.
+
+    Inputs: local (B,3,H,W), glob (B,3,H,W), pos (B,4) = [y0,x0,y1,x1] normalised
 
     Config:
         "arch": {"type": "DualBranchSegmentation",
@@ -137,7 +144,19 @@ class DualBranchSegmentation(BaseModel):
     """
     def __init__(self, num_classes=1, pretrained=True, freeze_encoder=False):
         super().__init__()
-        self.encoder = _make_encoder(pretrained, freeze=freeze_encoder)
+
+        bb = resnet50(weights=ResNet50_Weights.DEFAULT if pretrained else None)
+
+        # shared encoder — split into stages so local branch can expose skip features
+        self.enc_stem   = nn.Sequential(bb.conv1, bb.bn1, bb.relu, bb.maxpool)
+        self.enc_layer1 = bb.layer1   # → (B,  256, H/4,  W/4)
+        self.enc_layer2 = bb.layer2   # → (B,  512, H/8,  W/8)
+        self.enc_layer3 = bb.layer3   # → (B, 1024, H/16, W/16)
+        self.enc_layer4 = bb.layer4   # → (B, 2048, H/32, W/32)
+
+        if freeze_encoder:
+            for m in self._encoder_stages():
+                m.requires_grad_(False)
 
         self.cross_channel_attn = _CrossChannelAttention()
         self.channel_attn       = _ChannelAttention(4096, reduction=16)
@@ -148,30 +167,56 @@ class DualBranchSegmentation(BaseModel):
             nn.ReLU(inplace=True),
         )
 
-        self.decoder = nn.Sequential(
-            _DecoderBlock(2048, 1024),
-            _DecoderBlock(1024,  512),
-            _DecoderBlock( 512,  256),
-            _DecoderBlock( 256,  128),
-            _DecoderBlock( 128,   64),
-        )
+        # decoder with skip connections from local encoder
+        # skip channels: layer3=1024, layer2=512, layer1=256, stem=64
+        self.dec1 = _DecoderBlock(2048, 1024, skip_ch=1024)  # → H/16
+        self.dec2 = _DecoderBlock(1024,  512, skip_ch=512)   # → H/8
+        self.dec3 = _DecoderBlock( 512,  256, skip_ch=256)   # → H/4
+        self.dec4 = _DecoderBlock( 256,  128, skip_ch=64)    # → H/2
+        self.dec5 = _DecoderBlock( 128,   64)                 # → H
 
         self.head = nn.Conv2d(64, num_classes, kernel_size=1)
 
+    def _encoder_stages(self):
+        return [self.enc_stem, self.enc_layer1,
+                self.enc_layer2, self.enc_layer3, self.enc_layer4]
+
+    def _encode(self, x):
+        s0 = self.enc_stem(x)
+        s1 = self.enc_layer1(s0)
+        s2 = self.enc_layer2(s1)
+        s3 = self.enc_layer3(s2)
+        s4 = self.enc_layer4(s3)
+        return s4, (s0, s1, s2, s3)
+
     def train(self, mode=True):
         super().train(mode)
-        encoder_frozen = not any(p.requires_grad for p in self.encoder.parameters())
-        if encoder_frozen:
-            self.encoder.eval()
+        enc_frozen = not any(
+            p.requires_grad for m in self._encoder_stages() for p in m.parameters()
+        )
+        if enc_frozen:
+            for m in self._encoder_stages():
+                m.eval()
         return self
 
-    def forward(self, local, glob):
-        local_feat  = self.encoder(local)              # (B, 2048, h, w)
-        global_feat = self.encoder(glob)               # (B, 2048, h, w)
+    def forward(self, local, glob, pos):
+        local_feat,  local_skips = self._encode(local)   # (B,2048,h,w) + 4 skips
+        global_feat, _           = self._encode(glob)    # (B,2048,h,w)
+
+        # focus global features on the tile's region before attention
+        bias = _make_region_bias(pos, *global_feat.shape[2:], global_feat.device)
+        global_feat = global_feat * (1 + bias)
+
         local_attended = self.cross_channel_attn(local_feat, global_feat)
-        x = torch.cat([local_attended, global_feat], dim=1)  # (B, 4096, h, w)
+        x = torch.cat([local_attended, global_feat], dim=1)  # (B,4096,h,w)
         x = self.channel_attn(x)
-        x = self.fuse(x)                               # (B, 2048, h, w)
-        x = self.decoder(x)                            # (B, 64, H, W)
-        return self.head(x)                            # (B, num_classes, H, W)
+        x = self.fuse(x)                                 # (B,2048,h,w)
+
+        s0, s1, s2, s3 = local_skips
+        x = self.dec1(x,  s3)   # (B,1024,H/16)
+        x = self.dec2(x,  s2)   # (B, 512,H/8)
+        x = self.dec3(x,  s1)   # (B, 256,H/4)
+        x = self.dec4(x,  s0)   # (B, 128,H/2)
+        x = self.dec5(x)         # (B,  64,H)
+        return self.head(x)      # (B,num_classes,H,W)
 

@@ -21,7 +21,7 @@ class VentricleDataset(Dataset):
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
 
-        # Build flat list of (patch_path, stem) from all coordinates.json files
+        # Build flat list of (patch_path, stem, entry) from all coordinates.json files
         self.items = []
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
             stem = coords_file.parent.name
@@ -29,7 +29,7 @@ class VentricleDataset(Dataset):
                 entries = json.load(f)
             for entry in entries:
                 patch_path = coords_file.parent / entry['filename']
-                self.items.append((patch_path, stem))
+                self.items.append((patch_path, stem, entry))
 
         assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
 
@@ -37,10 +37,16 @@ class VentricleDataset(Dataset):
         return len(self.items)
 
     def __getitem__(self, idx):
-        patch_path, stem = self.items[idx]
+        patch_path, stem, entry = self.items[idx]
 
         local = torch.load(patch_path, weights_only=True)
         glob  = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
+
+        # normalised tile bounding box [y0, x0, y1, x1] within the tiled image
+        H, W = entry['image_H'], entry['image_W']
+        y, x = entry['y'], entry['x']
+        h, w = entry['height'], entry['width']
+        pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
 
         mask_path = self.mask_dir / stem / patch_path.name
         if mask_path.exists():
@@ -48,4 +54,4 @@ class VentricleDataset(Dataset):
         else:
             mask = torch.zeros(1, local.shape[-2], local.shape[-1])
 
-        return local, glob, mask
+        return local, glob, pos, mask
