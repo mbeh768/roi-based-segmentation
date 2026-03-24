@@ -9,7 +9,7 @@ def bce(output, target):
 def dice_loss_batch(output, target, eps=1e-6):
     probs = torch.sigmoid(output)
 
-    dims = (0, 1, 2, 3)    # compute over entire batch for stability
+    dims = (1, 2, 3)    # compute per image, then average over batch
     intersection = (probs * target).sum(dims)
     union = probs.sum(dims) + target.sum(dims)
 
