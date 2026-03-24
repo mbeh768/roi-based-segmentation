@@ -144,14 +144,14 @@ class Preprocessor:
             standardize (bool): if True, apply per-channel min-max stretching
             is_mask (bool): if True, use tifffile loader (preserves label values)
             target_size (int|None): override for output square size;
-                                    defaults to config['preprocess']['downsample']
+                                    defaults to config['preprocess']['global_downsample']
 
         Returns:
             np.ndarray: shape (C, H, W) float32, where C=3 for RGB images, C=1 for masks
         '''
         path = Path(path)
         suffix = path.suffix.lower()
-        _target = target_size if target_size is not None else self.c['preprocess']['downsample']
+        _target = target_size if target_size is not None else self.c['preprocess']['global_downsample']
 
         if suffix == '.czi':
             image = self._load_czi(path)

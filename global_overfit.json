@@ -35,15 +35,6 @@
             "gamma": 1.0
         }
     },
-    "preprocess": {
-        "raw_image_directory": "/media/max/2TBHDD/Max B_files_from Behfar_Shared folder/Segmentation_Project/RGB FULL - dataset/",
-        "downsample": 256,
-        "czi_max_px": 5000000000,
-        "tiling_size": 2048,
-        "tile_size": 256,
-        "stride": 256
-    },
-
     "trainer": {
         "epochs": 1500,
 
