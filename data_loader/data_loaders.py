@@ -1,6 +1,6 @@
 from torchvision import datasets, transforms
 from base import BaseDataLoader
-from data_loader.datasets import VentricleDataset, GlobalVentricleDataset
+from data_loader.datasets import VentricleDataset, GlobalVentricleDataset, LocalVentricleDataset
 
 
 class GlobalVentricleDataLoader(BaseDataLoader):
@@ -21,6 +21,12 @@ class GlobalVentricleDataLoader(BaseDataLoader):
     """
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1):
         self.dataset = GlobalVentricleDataset(data_dir)
+        super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
+
+
+class LocalVentricleDataLoader(BaseDataLoader):
+    def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1):
+        self.dataset = LocalVentricleDataset(data_dir)
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
 

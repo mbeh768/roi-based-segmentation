@@ -38,6 +38,48 @@ class GlobalVentricleDataset(Dataset):
         return image, mask
 
 
+class LocalVentricleDataset(Dataset):
+    """
+    Loads local patch tiles + corresponding masks only — no global context.
+
+    Builds a flat list of all patch_*.pt files across every patient via
+    coordinates.json, identical to VentricleDataset but returns only
+    (patch_image, patch_mask) so it feeds directly into SimpleUNet.
+
+    Returns (image, mask) — same 2-tuple contract as GlobalVentricleDataset.
+    """
+    def __init__(self, data_dir):
+        data_dir = Path(data_dir)
+        self.image_dir = data_dir / 'images'
+        self.mask_dir  = data_dir / 'masks'
+
+        self.items = []
+        for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
+            stem = coords_file.parent.name
+            with open(coords_file) as f:
+                entries = json.load(f)
+            for entry in entries:
+                patch_path = coords_file.parent / entry['filename']
+                self.items.append((patch_path, stem))
+
+        assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, idx):
+        patch_path, stem = self.items[idx]
+        image = torch.load(patch_path, weights_only=True)
+
+        mask_path = self.mask_dir / stem / patch_path.name
+        if mask_path.exists():
+            mask = torch.load(mask_path, weights_only=True)
+        else:
+            mask = torch.zeros(1, image.shape[-2], image.shape[-1])
+
+        return image, mask
+
+
 class VentricleDataset(Dataset):
     """
     Loads local tile + corresponding global image + mask.
