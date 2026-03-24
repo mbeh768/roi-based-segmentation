@@ -31,7 +31,7 @@
     "lr_scheduler": {
         "type": "CosineAnnealingLR",
         "args": {
-            "T_max": 1000,
+            "T_max": 500,
             "eta_min": 5e-4
         }
     },
@@ -45,7 +45,7 @@
     },
 
     "trainer": {
-        "epochs": 5000,
+        "epochs": 1500,
 
         "save_dir": "saved/",
         "save_period": 1000,

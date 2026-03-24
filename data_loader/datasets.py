@@ -4,6 +4,40 @@ import torch
 from torch.utils.data import Dataset
 
 
+class GlobalVentricleDataset(Dataset):
+    """
+    Loads only the downsampled global.pt image + corresponding global mask.
+
+    Each patient directory must contain:
+        data/images/<stem>/global.pt  — (3, H, W) float32
+        data/masks/<stem>/global.pt   — (1, H, W) float32
+
+    Returns (image, mask) — a 2-tuple so the trainer unpacks it as
+    (*inputs=[image], target=mask) and calls model(image).
+    """
+    def __init__(self, data_dir):
+        data_dir = Path(data_dir)
+        image_dir = data_dir / 'images'
+        mask_dir  = data_dir / 'masks'
+
+        self.pairs = []
+        for img_path in sorted(image_dir.glob('*/global.pt')):
+            mask_path = mask_dir / img_path.parent.name / 'global.pt'
+            if mask_path.exists():
+                self.pairs.append((img_path, mask_path))
+
+        assert len(self.pairs) > 0, f"No global.pt pairs found in {data_dir}"
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        img_path, mask_path = self.pairs[idx]
+        image = torch.load(img_path,  weights_only=True)
+        mask  = torch.load(mask_path, weights_only=True)
+        return image, mask
+
+
 class VentricleDataset(Dataset):
     """
     Loads local tile + corresponding global image + mask.
