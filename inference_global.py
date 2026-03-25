@@ -12,6 +12,7 @@ Usage:
     python inference_global.py --dataset-pairs -m <ckpt>
 """
 import argparse
+import random
 
 import cv2
 import torch
@@ -96,6 +97,7 @@ def main(args):
         p = Preprocessor(config)
         image_paths, mask_paths = p.find_source_filepaths()
         pairs = list(zip(image_paths, mask_paths))
+        random.shuffle(pairs)
         print(f"Found {len(pairs)} image/mask pairs")
         for i, (img_path, mask_path) in enumerate(pairs):
             title = f"{img_path.name}  [{i+1}/{len(pairs)}]"

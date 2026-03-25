@@ -15,6 +15,7 @@ Usage:
 """
 import argparse
 import json
+import random
 from pathlib import Path
 
 import cv2
@@ -131,6 +132,7 @@ def main(args):
     if args.dataset_pairs:
         image_paths, mask_paths = p.find_source_filepaths()
         pairs = list(zip(image_paths, mask_paths))
+        random.shuffle(pairs)
         print(f"Found {len(pairs)} image/mask pairs")
         for i, (img_path, mask_path) in enumerate(pairs):
             title = f"{img_path.name}  [{i+1}/{len(pairs)}]"
