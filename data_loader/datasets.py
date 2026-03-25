@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import Dataset
 
 
-class GlobalVentricleDataset(Dataset):
+class GlobalDataset(Dataset):
     """
     Loads only the downsampled global.pt image + corresponding global mask.
 
@@ -12,8 +12,7 @@ class GlobalVentricleDataset(Dataset):
         data/images/<stem>/global.pt  — (3, H, W) float32
         data/masks/<stem>/global.pt   — (1, H, W) float32
 
-    Returns (image, mask) — a 2-tuple so the trainer unpacks it as
-    (*inputs=[image], target=mask) and calls model(image).
+    Returns (image, mask).
     """
     def __init__(self, data_dir):
         data_dir = Path(data_dir)
@@ -38,15 +37,10 @@ class GlobalVentricleDataset(Dataset):
         return image, mask
 
 
-class LocalVentricleDataset(Dataset):
+class LocalDataset(Dataset):
     """
     Loads local patch tiles + corresponding masks only — no global context.
-
-    Builds a flat list of all patch_*.pt files across every patient via
-    coordinates.json, identical to VentricleDataset but returns only
-    (patch_image, patch_mask) so it feeds directly into SimpleUNet.
-
-    Returns (image, mask) — same 2-tuple contract as GlobalVentricleDataset.
+    Returns (image, mask).
     """
     def __init__(self, data_dir):
         data_dir = Path(data_dir)
@@ -80,9 +74,9 @@ class LocalVentricleDataset(Dataset):
         return image, mask
 
 
-class VentricleDataset(Dataset):
+class LocalGlobalDataset(Dataset):
     """
-    Loads local tile + corresponding global image + mask.
+    Loads local patch + corresponding global image + mask.
 
     Index is built by reading coordinates.json files written by preprocess.py.
     All files for a given image live together in data_dir/<subdir>/<stem>/:
@@ -90,14 +84,13 @@ class VentricleDataset(Dataset):
         patch_YYYY_XXXX.pt   — (C, H, W) float32  local tile
         coordinates.json     — patch index with stem, x, y, image_W, image_H
 
-    Returns (local_tensor, global_tensor, mask_tensor).
+    Returns (local, glob, pos, mask) where pos = [y0, x0, y1, x1] normalised.
     """
     def __init__(self, data_dir):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
 
-        # Build flat list of (patch_path, stem, entry) from all coordinates.json files
         self.items = []
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
             stem = coords_file.parent.name
@@ -118,7 +111,6 @@ class VentricleDataset(Dataset):
         local = torch.load(patch_path, weights_only=True)
         glob  = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
 
-        # normalised tile bounding box [y0, x0, y1, x1] within the tiled image
         H, W = entry['image_H'], entry['image_W']
         y, x = entry['y'], entry['x']
         h, w = entry['height'], entry['width']

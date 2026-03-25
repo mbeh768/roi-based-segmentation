@@ -1,51 +1,20 @@
-from torchvision import datasets, transforms
 from base import BaseDataLoader
-from data_loader.datasets import VentricleDataset, GlobalVentricleDataset, LocalVentricleDataset
+from data_loader.datasets import GlobalDataset, LocalDataset, LocalGlobalDataset
 
 
-class GlobalVentricleDataLoader(BaseDataLoader):
-    """
-    DataLoader for global-only overfitting experiments.
-
-    Config usage:
-        "data_loader": {
-            "type": "GlobalVentricleDataLoader",
-            "args": {
-                "data_dir": "data/",
-                "batch_size": 14,
-                "shuffle": true,
-                "validation_split": 0.0,
-                "num_workers": 2
-            }
-        }
-    """
+class GlobalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1):
-        self.dataset = GlobalVentricleDataset(data_dir)
+        self.dataset = GlobalDataset(data_dir)
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
 
-class LocalVentricleDataLoader(BaseDataLoader):
+class LocalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1):
-        self.dataset = LocalVentricleDataset(data_dir)
+        self.dataset = LocalDataset(data_dir)
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
 
-class VentricleDataLoader(BaseDataLoader):
-    """
-    DataLoader for the ventricle segmentation task.
-
-    Config usage:
-        "data_loader": {
-            "type": "VentricleDataLoader",
-            "args": {
-                "data_dir": "data/",
-                "batch_size": 4,
-                "shuffle": true,
-                "validation_split": 0.1,
-                "num_workers": 2
-            }
-        }
-    """
+class LocalGlobalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1):
-        self.dataset = VentricleDataset(data_dir)
+        self.dataset = LocalGlobalDataset(data_dir)
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
