@@ -202,14 +202,13 @@ class LocalGlobalUNet(BaseModel):
         self.up1  = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.dec1 = _double_conv(64  + 64,  64)     # up + local_s1
 
-        self.head = nn.Conv2d(64, num_classes, kernel_size=1)
+        self.head     = nn.Conv2d(64, num_classes, kernel_size=1)
+        self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
 
-    def forward(self, local, glob, pos=None):
+    def forward(self, local, glob, pos):
         l_bot, (l_s1, l_s2, l_s3, l_s4) = self.local_enc(local)
         g_feat = self.global_enc(glob)                               # (B, global_ch, H', W')
 
-        if pos is None:
-            raise ValueError("LocalGlobalUNet requires pos — tile coordinates must be provided")
         g_ctx = _crop_and_resize(g_feat, pos, *l_bot.shape[2:])
 
         x = torch.cat([l_bot, g_ctx], dim=1)                        # (B, 1024+global_ch, H/16, W/16)
@@ -219,4 +218,15 @@ class LocalGlobalUNet(BaseModel):
         x = self.dec2(torch.cat([self.up2(x), l_s2], dim=1))        # (B,  128, H/2)
         x = self.dec1(torch.cat([self.up1(x), l_s1], dim=1))        # (B,   64, H)
 
-        return self.head(x)                                          # (B, num_classes, H, W)
+        main = self.head(x)                                          # (B, num_classes, H, W)
+
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear',
+                align_corners=True,
+            )                                                        # (B, num_classes, globalH, globalW)
+            return main, aux
+
+        return main

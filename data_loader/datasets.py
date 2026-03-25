@@ -122,4 +122,9 @@ class LocalGlobalDataset(Dataset):
         else:
             mask = torch.zeros(1, local.shape[-2], local.shape[-1])
 
-        return local, glob, pos, mask
+        global_mask_path = self.mask_dir / stem / 'global.pt'
+        if not global_mask_path.exists():
+            raise FileNotFoundError(f"Global mask not found: {global_mask_path}")
+        global_mask = torch.load(global_mask_path, weights_only=True)
+
+        return local, glob, pos, mask, global_mask

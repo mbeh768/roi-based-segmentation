@@ -7,7 +7,7 @@
         "args": {"num_classes": 1, "freeze_encoder": false}
     },
     "data_loader": {
-        "type": "VentricleDataLoader",
+        "type": "LocalGlobalDataLoader",
         "args":{
             "data_dir": "data/64_tiles_per_image",
             "batch_size": 20,

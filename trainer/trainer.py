@@ -27,6 +27,8 @@ class Trainer(BaseTrainer):
         self.lr_scheduler = lr_scheduler
         self.log_step = int(np.sqrt(data_loader.batch_size))
 
+        self.aux_loss_weight = config['trainer'].get('aux_loss_weight', 0.0)
+
         self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
 
@@ -39,13 +41,27 @@ class Trainer(BaseTrainer):
         """
         self.model.train()
         self.train_metrics.reset()
-        for batch_idx, (*inputs, target) in enumerate(self.data_loader):
-            inputs = [x.to(self.device) for x in inputs]
+        for batch_idx, batch in enumerate(self.data_loader):
+            # Last element is always the primary target; second-to-last is global_mask if aux is on
+            if self.aux_loss_weight > 0:
+                *raw_inputs, aux_target, target = batch
+                aux_target = aux_target.to(self.device)
+            else:
+                *raw_inputs, target = batch
+                aux_target = None
+            inputs = [x.to(self.device) for x in raw_inputs]
             target = target.to(self.device)
 
             self.optimizer.zero_grad()
             output = self.model(*inputs)
-            loss = self.criterion(output, target)
+            if isinstance(output, tuple):
+                main_out, aux_out = output
+                loss = self.criterion(main_out, target)
+                if aux_target is not None:
+                    loss = loss + self.aux_loss_weight * self.criterion(aux_out, aux_target)
+                output = main_out  # for metrics
+            else:
+                loss = self.criterion(output, target)
             loss.backward()
             self.optimizer.step()
 
