@@ -9,7 +9,7 @@
     "data_loader": {
         "type": "LocalVentricleDataLoader",
         "args":{
-            "data_dir": "data/four_tiles_per_image",
+            "data_dir": "data/64_tiles_per_image",
             "batch_size": 14,
             "shuffle": true,
             "validation_split": 0.0,

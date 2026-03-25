@@ -9,7 +9,7 @@
     "data_loader": {
         "type": "VentricleDataLoader",
         "args":{
-            "data_dir": "data/four_tiles_per_image",
+            "data_dir": "data/64_tiles_per_image",
             "batch_size": 20,
             "shuffle": true,
             "validation_split": 0.0,
@@ -39,7 +39,7 @@
         "raw_image_directory": "/media/max/2TBHDD/Max B_files_from Behfar_Shared folder/Segmentation_Project/RGB FULL - dataset/",
         "global_downsample": 256,
         "czi_max_px": 5000000000,
-        "tiling_size": 512,
+        "tiling_size": 2048,
         "tile_size": 256,
         "stride": 256
     },
