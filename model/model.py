@@ -132,6 +132,36 @@ class _UNetEncoder(nn.Module):
         return bot, (s1, s2, s3, s4)
 
 
+class _GlobalShallowEncoder(nn.Module):
+    """
+    Shallow stack of 5×5 convolutions (no padding, no pooling) for the global branch.
+
+    Each layer shrinks spatial dims by 4 pixels. With num_layers=4 the receptive
+    field is 17×17 pixels — small enough that features remain spatially specific,
+    making the positional crop meaningful.
+
+    Input:  (B, 3,       H,          W)
+    Output: (B, out_ch,  H-4*layers, W-4*layers)
+    """
+    def __init__(self, out_ch=64, num_layers=32):
+        super().__init__()
+        layers = []
+        in_ch = 3
+        mid_ch = out_ch
+        for i in range(num_layers):
+            out = out_ch if i == num_layers - 1 else mid_ch
+            layers += [
+                nn.Conv2d(in_ch, out, kernel_size=5, padding=0, bias=False),
+                nn.GroupNorm(8, out),
+                nn.ReLU(inplace=True),
+            ]
+            in_ch = out
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)  # (B, out_ch, H', W')
+
+
 class LocalGlobalUNet(BaseModel):
     """
     UNet that jointly encodes a local tile and a downsampled global image.
@@ -153,14 +183,14 @@ class LocalGlobalUNet(BaseModel):
     Config:
         "arch": {"type": "LocalGlobalUNet", "args": {"num_classes": 1}}
     """
-    def __init__(self, num_classes=1):
+    def __init__(self, num_classes=1, global_ch=64, global_layers=32):
         super().__init__()
 
         self.local_enc  = _UNetEncoder()
-        self.global_enc = _UNetEncoder()
+        self.global_enc = _GlobalShallowEncoder(out_ch=global_ch, num_layers=global_layers)
 
-        # bottleneck: cat(local 1024, global 1024) → 2048, then decoder is local-skip only
-        self.up4  = nn.ConvTranspose2d(2048, 512, kernel_size=2, stride=2)
+        # bottleneck: cat(local 1024, global global_ch) → 1024+global_ch
+        self.up4  = nn.ConvTranspose2d(1024 + global_ch, 512, kernel_size=2, stride=2)
         self.dec4 = _double_conv(512 + 512, 512)    # up + local_s4
 
         self.up3  = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
@@ -176,12 +206,13 @@ class LocalGlobalUNet(BaseModel):
 
     def forward(self, local, glob, pos=None):
         l_bot, (l_s1, l_s2, l_s3, l_s4) = self.local_enc(local)
-        g_bot, _                         = self.global_enc(glob)
+        g_feat = self.global_enc(glob)                               # (B, global_ch, H', W')
 
-        if pos is not None:
-            g_bot = _crop_and_resize(g_bot, pos, *l_bot.shape[2:])
+        if pos is None:
+            raise ValueError("LocalGlobalUNet requires pos — tile coordinates must be provided")
+        g_ctx = _crop_and_resize(g_feat, pos, *l_bot.shape[2:])
 
-        x = torch.cat([l_bot, g_bot], dim=1)                        # (B, 2048, H/16, W/16)
+        x = torch.cat([l_bot, g_ctx], dim=1)                        # (B, 1024+global_ch, H/16, W/16)
 
         x = self.dec4(torch.cat([self.up4(x), l_s4], dim=1))        # (B,  512, H/8)
         x = self.dec3(torch.cat([self.up3(x), l_s3], dim=1))        # (B,  256, H/4)

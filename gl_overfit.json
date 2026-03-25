@@ -1,5 +1,5 @@
 {
-    "name": "g+l_overfit_with_bias_on_bottleneck",
+    "name": "g+l_overfit_with_crop_bottleneck",
     "n_gpu": 1,
 
     "arch": {
