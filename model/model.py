@@ -1,8 +1,23 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import resnet50, ResNet50_Weights
 from base import BaseModel
+
+
+def _make_region_bias(pos, h, w, device):
+    """
+    Gaussian heatmap (B, 1, h, w) centred on the tile's region in the global feature map.
+    pos: (B, 4) = [y0, x0, y1, x1] normalised to [0, 1]
+    """
+    B = pos.shape[0]
+    ys = torch.linspace(0, 1, h, device=device).view(1, h, 1)
+    xs = torch.linspace(0, 1, w, device=device).view(1, 1, w)
+    cy = ((pos[:, 0] + pos[:, 2]) / 2).view(B, 1, 1)
+    cx = ((pos[:, 1] + pos[:, 3]) / 2).view(B, 1, 1)
+    sy = ((pos[:, 2] - pos[:, 0]) / 2).clamp(min=1.0 / h).view(B, 1, 1)
+    sx = ((pos[:, 3] - pos[:, 1]) / 2).clamp(min=1.0 / w).view(B, 1, 1)
+    gauss = torch.exp(-0.5 * (((ys - cy) / sy) ** 2 + ((xs - cx) / sx) ** 2))
+    return gauss.unsqueeze(1)   # (B, 1, h, w)
 
 
 def _double_conv(in_ch, out_ch):
@@ -97,8 +112,11 @@ class LocalGlobalUNet(BaseModel):
 
     Both inputs pass through independent encoders. The decoder follows the
     local encoder's skip connections, with global encoder features concatenated
-    at every scale (bottleneck + each decoder stage). No position encoding —
-    global context is injected purely by channel concatenation.
+    at every scale (bottleneck + each decoder stage).
+
+    If pos (B, 4) = [y0, x0, y1, x1] normalised is provided, a Gaussian bias
+    is applied to every global skip connection to focus them on the tile's
+    approximate location in the global feature map.
 
     Decoder input channels are up + local_skip + global_skip at each level,
     roughly tripling vs a plain UNet decoder but keeping the output channels
@@ -134,6 +152,16 @@ class LocalGlobalUNet(BaseModel):
     def forward(self, local, glob, pos=None):
         l_bot, (l_s1, l_s2, l_s3, l_s4) = self.local_enc(local)
         g_bot, (g_s1, g_s2, g_s3, g_s4) = self.global_enc(glob)
+
+        if pos is not None:
+            def bias(feat):
+                b = _make_region_bias(pos, *feat.shape[2:], feat.device)
+                return feat * (1 + b)
+            g_bot = bias(g_bot)
+            g_s4  = bias(g_s4)
+            g_s3  = bias(g_s3)
+            g_s2  = bias(g_s2)
+            g_s1  = bias(g_s1)
 
         x = torch.cat([l_bot, g_bot], dim=1)                           # (B, 2048, H/16, W/16)
 
