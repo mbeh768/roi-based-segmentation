@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import timm
 from base import BaseModel
 
 
@@ -227,6 +228,102 @@ class LocalGlobalUNet(BaseModel):
                 mode='bilinear',
                 align_corners=True,
             )                                                        # (B, num_classes, globalH, globalW)
+            return main, aux
+
+        return main
+
+
+class ImageNetUNet(BaseModel):
+    """
+    UNet with a frozen ImageNet-pretrained ResNetV2-50x1 encoder, mirroring the
+    LocalGlobalUNet interface.
+
+    The timm encoder produces 5 feature stages:
+        s0:  64 ch @ H/2   (stem)
+        s1: 256 ch @ H/4
+        s2: 512 ch @ H/8
+        s3: 1024 ch @ H/16
+        s4: 2048 ch @ H/32
+
+    An extra pool + double_conv pushes to a true bottleneck at H/64.
+    Global context is cropped to the bottleneck spatial size and concatenated
+    there, identical to LocalGlobalUNet.  All 5 encoder stages are used as
+    skip connections in the decoder, plus a final no-skip step (H/2 → H).
+
+    Inputs: local (B, 3, H, W), glob (B, 3, H, W), pos (B, 4)
+    Output: (main_logits, aux_logits) during training, main_logits during eval
+
+    Config:
+        "arch": {"type": "ImageNetUNet", "args": {"num_classes": 1}}
+    """
+    def __init__(self, num_classes=1, global_ch=64, global_layers=32):
+        super().__init__()
+
+        # Frozen ImageNet encoder
+        self.encoder = timm.create_model(
+            'resnetv2_50x1_bit',
+            pretrained=True,
+            features_only=True,
+            out_indices=(0, 1, 2, 3, 4),
+        )
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+
+        self.global_enc = _GlobalShallowEncoder(out_ch=global_ch, num_layers=global_layers)
+
+        # Extra layer: pool(s4) → bottleneck at H/64
+        self.pool       = nn.MaxPool2d(2)
+        self.bottleneck = _double_conv(2048, 2048)
+
+        # Decoder: inject global at bottleneck then step through s4 → s0 → final up
+        self.up5  = nn.ConvTranspose2d(2048 + global_ch, 1024, kernel_size=2, stride=2)
+        self.dec5 = _double_conv(1024 + 2048, 1024)   # up + s4  → H/32
+
+        self.up4  = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.dec4 = _double_conv(512  + 1024,  512)   # up + s3  → H/16
+
+        self.up3  = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec3 = _double_conv(256  +  512,  256)   # up + s2  → H/8
+
+        self.up2  = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec2 = _double_conv(128  +  256,  128)   # up + s1  → H/4
+
+        self.up1  = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec1 = _double_conv(64   +   64,   64)   # up + s0  → H/2
+
+        self.up0  = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
+        self.dec0 = _double_conv(32, 32)               # no skip  → H
+
+        self.head     = nn.Conv2d(32, num_classes, kernel_size=1)
+        self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos):
+        with torch.no_grad():
+            s0, s1, s2, s3, s4 = self.encoder(local)  # H/2, H/4, H/8, H/16, H/32
+
+        bot    = self.bottleneck(self.pool(s4))        # (B, 2048, H/64, W/64)
+
+        g_feat = self.global_enc(glob)
+        g_ctx  = _crop_and_resize(g_feat, pos, *bot.shape[2:])
+
+        x = torch.cat([bot, g_ctx], dim=1)             # (B, 2048+global_ch, H/64)
+
+        x = self.dec5(torch.cat([self.up5(x), s4], dim=1))  # (B, 1024, H/32)
+        x = self.dec4(torch.cat([self.up4(x), s3], dim=1))  # (B,  512, H/16)
+        x = self.dec3(torch.cat([self.up3(x), s2], dim=1))  # (B,  256, H/8)
+        x = self.dec2(torch.cat([self.up2(x), s1], dim=1))  # (B,  128, H/4)
+        x = self.dec1(torch.cat([self.up1(x), s0], dim=1))  # (B,   64, H/2)
+        x = self.dec0(self.up0(x))                          # (B,   32, H)
+
+        main = self.head(x)                            # (B, num_classes, H, W)
+
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear',
+                align_corners=True,
+            )                                          # (B, num_classes, globalH, globalW)
             return main, aux
 
         return main
