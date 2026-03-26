@@ -44,7 +44,7 @@ class Trainer(BaseTrainer):
         for batch_idx, batch in enumerate(self.data_loader):
             # Last element is always the primary target; second-to-last is global_mask if aux is on
             if self.aux_loss_weight > 0:
-                *raw_inputs, aux_target, target = batch
+                *raw_inputs, target, aux_target = batch
                 aux_target = aux_target.to(self.device)
             else:
                 *raw_inputs, target = batch

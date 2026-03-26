@@ -1,5 +1,5 @@
 {
-    "name": "g+l_overfit_with_preseved_global_dims",
+    "name": "g+l_overfit_with_preseved_global_dims_and_aux",
     "n_gpu": 1,
 
     "arch": {
@@ -26,7 +26,7 @@
     },
     "loss": "bce_dice",
     "metrics": [
-        "accuracy", "iou"
+        "iou", "accuracy"
     ],
     "lr_scheduler": {
         "type": "StepLR",

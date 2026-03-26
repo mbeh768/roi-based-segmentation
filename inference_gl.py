@@ -44,8 +44,14 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
     local_batch = torch.stack(tiles).to(device)                    # (N, 3, tile_H, tile_W)
     glob_batch  = glob.unsqueeze(0).expand(N, -1, -1, -1).to(device)  # (N, 3, gH, gW)
 
+    pos_list = [
+        torch.tensor([y / H, x / W, (y + tile_size) / H, (x + tile_size) / W], dtype=torch.float32)
+        for y in ys for x in xs
+    ]
+    pos_batch = torch.stack(pos_list).to(device)                   # (N, 4)
+
     with torch.no_grad():
-        logits = model(local_batch, glob_batch)                    # (N, 1, tile_H, tile_W)
+        logits = model(local_batch, glob_batch, pos_batch)         # (N, 1, tile_H, tile_W)
     probs_tiles = torch.sigmoid(logits).squeeze(1).cpu()           # (N, tile_H, tile_W)
 
     prob_map = stitch(list(probs_tiles), ys, xs, H, W, tile_size, stride)
