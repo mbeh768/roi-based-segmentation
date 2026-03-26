@@ -266,7 +266,7 @@ class ImageNetUNet(BaseModel):
             features_only=True,
             out_indices=(0, 1, 2, 3, 4),
         )
-        for p in self.encoder.parameters():
+        for p in self.encoder.parameters(): # freeze model
             p.requires_grad = False
 
         self.global_enc = _GlobalShallowEncoder(out_ch=global_ch, num_layers=global_layers)
