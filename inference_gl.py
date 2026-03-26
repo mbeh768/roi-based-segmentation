@@ -73,8 +73,14 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
     axes[2].set_title(f'Prediction (t={threshold})')
 
     if mask_stitched is not None:
+        eps = 1e-6
+        intersection = (pred_map * mask_stitched).sum()
+        union = pred_map.sum() + mask_stitched.sum() - intersection
+        iou_val = ((intersection + eps) / (union + eps)).item()
+        acc_val = (pred_map == mask_stitched).float().mean().item()
+
         axes[3].imshow(mask_stitched.numpy(), cmap='gray', vmin=0, vmax=1)
-        axes[3].set_title('Ground truth')
+        axes[3].set_title(f'GT  |  IoU={iou_val:.3f}  Acc={acc_val:.3f}')
 
     for ax in axes:
         ax.axis('off')

@@ -17,7 +17,7 @@ def dice_loss(output, target, eps=1e-6):
     return dice.mean()
 
 
-def bce_dice(output, target, a=0.5):
+def bce_dice(output, target, a=0.3):
     """
     Combined Dice loss and Binary Cross Entropy loss.
     output: logits, shape (B, 1, H, W)
