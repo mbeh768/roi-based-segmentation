@@ -1,5 +1,5 @@
 {
-    "name": "overfitting_experiment",
+    "name": "Initial_Validation_Experiment",
     "n_gpu": 1,
 
     "arch": {
