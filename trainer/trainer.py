@@ -29,7 +29,8 @@ class Trainer(BaseTrainer):
 
         self.aux_loss_weight = config['trainer'].get('aux_loss_weight', 0.0)
 
-        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
+        train_keys = ['loss', 'main_loss'] if self.aux_loss_weight > 0 else ['loss']
+        self.train_metrics = MetricTracker(*train_keys, *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
 
     def _train_epoch(self, epoch):
@@ -57,17 +58,22 @@ class Trainer(BaseTrainer):
             output = self.model(*inputs)
             if isinstance(output, tuple):
                 main_out, aux_out = output
-                loss = self.criterion(main_out, target)
+                main_loss = self.criterion(main_out, target)
                 if aux_target is not None:
-                    loss = loss + self.aux_loss_weight * self.criterion(aux_out, aux_target)
+                    loss = main_loss + self.aux_loss_weight * self.criterion(aux_out, aux_target)
+                else:
+                    loss = main_loss
                 output = main_out  # for metrics
             else:
+                main_loss = None
                 loss = self.criterion(output, target)
             loss.backward()
             self.optimizer.step()
 
             self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
+            if self.aux_loss_weight > 0 and main_loss is not None:
+                self.train_metrics.update('main_loss', main_loss.item())
             for met in self.metric_ftns:
                 self.train_metrics.update(met.__name__, met(output, target))
 
