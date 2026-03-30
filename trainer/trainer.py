@@ -42,10 +42,11 @@ class Trainer(BaseTrainer):
         self.model.train()
         self.train_metrics.reset()
         for batch_idx, batch in enumerate(self.data_loader):
-            # Last element is always the primary target; second-to-last is global_mask if aux is on
-            if self.aux_loss_weight > 0:
+            # 5-element batches (LocalGlobalDataset): (local, glob, pos, mask, global_mask)
+            # 2-element batches (GlobalDataset / LocalDataset): (image, mask)
+            if len(batch) > 2:
                 *raw_inputs, target, aux_target = batch
-                aux_target = aux_target.to(self.device)
+                aux_target = aux_target.to(self.device) if self.aux_loss_weight > 0 else None
             else:
                 *raw_inputs, target = batch
                 aux_target = None
@@ -99,17 +100,24 @@ class Trainer(BaseTrainer):
         self.model.eval()
         self.valid_metrics.reset()
         with torch.no_grad():
-            for batch_idx, (data, target) in enumerate(self.valid_data_loader):
-                data, target = data.to(self.device), target.to(self.device)
+            for batch_idx, batch in enumerate(self.valid_data_loader):
+                if len(batch) > 2:
+                    *raw_inputs, target, _ = batch  # strip global_mask, not used in validation
+                else:
+                    *raw_inputs, target = batch
+                inputs = [x.to(self.device) for x in raw_inputs]
+                target = target.to(self.device)
 
-                output = self.model(data)
+                output = self.model(*inputs)
+                if isinstance(output, tuple):
+                    output = output[0]
                 loss = self.criterion(output, target)
 
                 self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.valid_metrics.update('loss', loss.item())
                 for met in self.metric_ftns:
                     self.valid_metrics.update(met.__name__, met(output, target))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                self.writer.add_image('input', make_grid(inputs[0].cpu(), nrow=8, normalize=True))
 
         # add histogram of model parameters to the tensorboard
         for name, p in self.model.named_parameters():

@@ -3,8 +3,8 @@
     "n_gpu": 1,
 
     "arch": {
-        "type": "DualBranchSegmentation",
-        "args": {"num_classes": 1, "freeze_encoder": false}
+        "type": "LocalGlobalUNet",
+        "args": {"num_classes": 1}
     },
     "data_loader": {
         "type": "LocalGlobalDataLoader",
@@ -12,7 +12,7 @@
             "data_dir": "data/64_tiles_per_image",
             "batch_size": 20,
             "shuffle": true,
-            "validation_split": 0.0,
+            "validation_split": 0.2,
             "num_workers": 2
         }
     },
@@ -26,7 +26,7 @@
     },
     "loss": "bce_dice",
     "metrics": [
-        "accuracy", "pct_low_accuracy_tiles"
+        "iou", "accuracy"
     ],
     "lr_scheduler": {
         "type": "CosineAnnealingLR",
@@ -54,6 +54,7 @@
         "monitor": "min val_loss",
         "early_stop": 10,
 
-        "tensorboard": true
+        "tensorboard": true,
+        "aux_loss_weight": 0.4
     }
 }
