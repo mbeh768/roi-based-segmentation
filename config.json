@@ -1,5 +1,5 @@
 {
-    "name": "[VAL] initial experiment",
+    "name": "[VAL] imagenet_encoder_experiment",
     "n_gpu": 1,
 
     "arch": {
@@ -9,7 +9,7 @@
     "data_loader": {
         "type": "LocalGlobalDataLoader",
         "args":{
-            "data_dir": "data/64_tiles_per_image",
+            "data_dir": "data/[Imagenet Norm]64_tiles_per_image",
             "batch_size": 20,
             "shuffle": true,
             "validation_split": 0.2,
@@ -48,7 +48,7 @@
         "epochs": 1500,
 
         "save_dir": "saved/",
-        "save_period": 1000,
+        "save_period": 10,
         "verbosity": 2,
 
         "monitor": "min val_loss",

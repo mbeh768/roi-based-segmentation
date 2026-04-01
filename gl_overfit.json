@@ -1,5 +1,5 @@
 {
-    "name": "[overfit]preseved_global_dims_and_aux_3layeronly",
+    "name": "[OVER] imagenet_encoder_experiment",
     "n_gpu": 1,
 
     "arch": {
@@ -9,7 +9,7 @@
     "data_loader": {
         "type": "LocalGlobalDataLoader",
         "args":{
-            "data_dir": "data/64_tiles_per_image",
+            "data_dir": "data/[Imagenet Norm]64_tiles_per_image",
             "batch_size": 14,
             "shuffle": true,
             "validation_split": 0.0,

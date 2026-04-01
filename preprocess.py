@@ -133,7 +133,7 @@ class Preprocessor:
 
         return data                                        # CHW original dtype
 
-    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None):
+    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None, imagenet_norm=False):
         '''
         Load an image or mask, resize to a square, normalize to float32 [0, 1],
         optionally standardize channels per-channel, zero-pad to square.
@@ -202,6 +202,11 @@ class Preprocessor:
                 ch_max = image[c].max()
                 if ch_max > ch_min:
                     image[c] = (image[c] - ch_min) / (ch_max - ch_min)
+
+        if imagenet_norm and not is_mask:
+            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
+            std  = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
+            image = (image - mean) / std
 
         return image    # (C, H, W) float32
 
@@ -324,6 +329,9 @@ if __name__ == '__main__':
                         help='process images only, skip mask processing')
     parser.add_argument('--dry-run', action='store_true',
                         help='print stats and show previews without saving any files')
+    parser.add_argument('--imagenet', action='store_true',
+                        help='apply ImageNet normalisation (mean/std) to images after [0,1] scaling; '
+                             'required when using ImageNetUNet')
     args = parser.parse_args()
 
     # load config
@@ -364,7 +372,7 @@ if __name__ == '__main__':
 
         # --- global ---
         logger.info(f"[WORKING]\tglobal image...")
-        image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False)
+        image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False, imagenet_norm=args.imagenet)
         image_vis = p.save_global(image, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tglobal image  shape={image.shape}")
 
@@ -395,7 +403,7 @@ if __name__ == '__main__':
 
         logger.info(f"[WORKING]\tlocal image tiles...")
         image_local = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
-                                        target_size=tiling_size)
+                                        target_size=tiling_size, imagenet_norm=args.imagenet)
         n = p.save_local(image_local, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tlocal image  {n} patches")
 
