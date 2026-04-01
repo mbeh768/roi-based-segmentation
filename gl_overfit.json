@@ -1,5 +1,5 @@
 {
-    "name": "[OVER] imagenet_encoder_experiment",
+    "name": "[OVER] rn18_betterglobalencoder_experiment",
     "n_gpu": 1,
 
     "arch": {
