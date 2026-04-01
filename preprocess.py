@@ -329,9 +329,6 @@ if __name__ == '__main__':
                         help='process images only, skip mask processing')
     parser.add_argument('--dry-run', action='store_true',
                         help='print stats and show previews without saving any files')
-    parser.add_argument('--imagenet', action='store_true',
-                        help='apply ImageNet normalisation (mean/std) to images after [0,1] scaling; '
-                             'required when using ImageNetUNet')
     args = parser.parse_args()
 
     # load config
@@ -372,7 +369,8 @@ if __name__ == '__main__':
 
         # --- global ---
         logger.info(f"[WORKING]\tglobal image...")
-        image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False, imagenet_norm=args.imagenet)
+        imagenet_norm = config['preprocess'].get('imagenet_norm', False)
+        image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False, imagenet_norm=imagenet_norm)
         image_vis = p.save_global(image, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tglobal image  shape={image.shape}")
 
@@ -403,7 +401,7 @@ if __name__ == '__main__':
 
         logger.info(f"[WORKING]\tlocal image tiles...")
         image_local = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
-                                        target_size=tiling_size, imagenet_norm=args.imagenet)
+                                        target_size=tiling_size, imagenet_norm=imagenet_norm)
         n = p.save_local(image_local, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tlocal image  {n} patches")
 

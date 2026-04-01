@@ -161,43 +161,46 @@ class _GlobalShallowEncoder(nn.Module):
         return self.net(x)  # (B, out_ch, H', W')
 
 
-
-class _GlobalEncoder(nn.Module):
+class _GlobalUNet(nn.Module):
     """
-    Feature extractor for the global branch.
+    Small UNet for the global branch.
 
-    Always applies two full-resolution _double_conv blocks (with residual shortcuts),
-    then n_down rounds of _double_conv + MaxPool2d(2).
+    Encoder: 3 × (_double_conv + pool), 3→32→64→64 channels.
+    Bottleneck at H/8 (RF ~61 px on a 256-px input).
+    Decoder: 3 × (upsample + skip + _double_conv) back to full resolution.
 
-    The output resolution should be chosen so that the local tile's region (defined
-    by pos) covers an area equal to the local bottleneck spatial size:
+    Output: (B, out_ch, H, W) — dense spatial features for _crop_and_resize.
 
-        output_size = bottleneck_size / tile_fraction
-        tile_fraction = tile_size / tiling_size
-
-    For the default setup (tile_size=256, tiling_size=2048, tile_fraction=1/8):
-        LocalGlobalUNet (bottleneck 32×32): output_size=256 → n_down=0
-        ImageNetUNet    (bottleneck  8×8):  output_size=64  → n_down=2
-
-    Output: (B, out_ch, H / 2**n_down, W / 2**n_down)
+    Pretrain without labels: attach Conv2d(out_ch, 3, 1), crop g_feat at tile
+    position with _crop_and_resize, and reconstruct a downsampled local tile.
     """
-    def __init__(self, out_ch=64, n_down=0):
+    def __init__(self, out_ch=64):
         super().__init__()
-        mid = min(32, out_ch)
-        self.pre1 = _double_conv(3,   mid)
-        self.sc1  = nn.Conv2d(3,   mid,    kernel_size=1, bias=False)
-        self.pre2 = _double_conv(mid, out_ch)
-        self.sc2  = nn.Conv2d(mid, out_ch, kernel_size=1, bias=False) if mid != out_ch else nn.Identity()
+        self.pool = nn.MaxPool2d(2)
 
-        self.pool   = nn.MaxPool2d(2)
-        self.downs  = nn.ModuleList([_double_conv(out_ch, out_ch) for _ in range(n_down)])
+        self.enc1 = _double_conv(3,   32)
+        self.enc2 = _double_conv(32,  64)
+        self.enc3 = _double_conv(64,  64)
+        self.bot  = _double_conv(64,  64)           # H/8
+
+        self.up3  = nn.ConvTranspose2d(64,     64,     2, 2)
+        self.dec3 = _double_conv(64  + 64,     64)   # +enc3 skip → H/4
+
+        self.up2  = nn.ConvTranspose2d(64,     64,     2, 2)
+        self.dec2 = _double_conv(64  + 64,     64)   # +enc2 skip → H/2
+
+        self.up1  = nn.ConvTranspose2d(64,     out_ch, 2, 2)
+        self.dec1 = _double_conv(out_ch + 32,  out_ch) # +enc1 skip → H
 
     def forward(self, x):
-        x = self.pre1(x) + self.sc1(x)          # (B, mid,    H, W)
-        x = self.pre2(x) + self.sc2(x)          # (B, out_ch, H, W)
-        for block in self.downs:
-            x = self.pool(block(x) + x)          # identity shortcut then pool
-        return x   # (B, out_ch, H / 2**n_down, W / 2**n_down)
+        s1 = self.enc1(x)                                        # (B, 32, H,   W)
+        s2 = self.enc2(self.pool(s1))                            # (B, 64, H/2, W/2)
+        s3 = self.enc3(self.pool(s2))                            # (B, 64, H/4, W/4)
+        x  = self.bot(self.pool(s3))                             # (B, 64, H/8, W/8)
+        x  = self.dec3(torch.cat([self.up3(x), s3], dim=1))     # (B, 64, H/4)
+        x  = self.dec2(torch.cat([self.up2(x), s2], dim=1))     # (B, 64, H/2)
+        x  = self.dec1(torch.cat([self.up1(x), s1], dim=1))     # (B, out_ch, H)
+        return x
 
 
 class LocalGlobalUNet(BaseModel):
@@ -221,11 +224,11 @@ class LocalGlobalUNet(BaseModel):
     Config:
         "arch": {"type": "LocalGlobalUNet", "args": {"num_classes": 1}}
     """
-    def __init__(self, num_classes=1, global_ch=64, n_down=0):
+    def __init__(self, num_classes=1, global_ch=64):
         super().__init__()
 
         self.local_enc  = _UNetEncoder()
-        self.global_enc = _GlobalEncoder(out_ch=global_ch, n_down=n_down)
+        self.global_enc = _GlobalUNet(out_ch=global_ch)
 
         # bottleneck: cat(local 512, global global_ch) → 512+global_ch
         self.up3  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
@@ -340,6 +343,7 @@ class ImageNetUNetShallow(BaseModel):
 
         return main
 
+
 class ImageNetUNet(BaseModel):
     """
     UNet with a frozen ImageNet-pretrained ResNet-18 encoder.
@@ -371,7 +375,7 @@ class ImageNetUNet(BaseModel):
         for p in self.encoder.parameters():
             p.requires_grad = False
 
-        self.global_enc = _GlobalEncoder(out_ch=global_ch, n_down=n_down)
+        self.global_enc = _GlobalUNet(out_ch=global_ch)
 
         self.bottleneck = _double_conv(512, 512)       # refine s4 @ H/32
 

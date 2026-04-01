@@ -37,7 +37,8 @@ def tif_to_tensor(path, config, is_mask=False):
     """Load a TIFF and return a (C, H, W) float32 tensor via the preprocess pipeline."""
     p = Preprocessor(config)
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
-    arr = p.load_and_format(path, interp, standardize=not is_mask, is_mask=is_mask)
+    imagenet_norm = config['preprocess'].get('imagenet_norm', False) if not is_mask else False
+    arr = p.load_and_format(path, interp, standardize=not is_mask, is_mask=is_mask, imagenet_norm=imagenet_norm)
     return torch.from_numpy(arr)   # (C, H, W) float32
 
 

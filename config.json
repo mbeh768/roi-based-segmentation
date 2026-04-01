@@ -41,7 +41,8 @@
         "czi_max_px": 5000000000,
         "tiling_size": 2048,
         "tile_size": 256,
-        "stride": 256
+        "stride": 256,
+        "imagenet_norm": true
     },
 
     "trainer": {

@@ -39,8 +39,10 @@ def tif_to_tiles(path, p, is_mask=False):
     tiling_size = p.c['preprocess']['tiling_size']
 
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
+    imagenet_norm = p.c['preprocess'].get('imagenet_norm', False)
     arr = p.load_and_format(path, interp, standardize=not is_mask,
-                            is_mask=is_mask, target_size=tiling_size)  # (C, H, W)
+                            is_mask=is_mask, target_size=tiling_size,
+                            imagenet_norm=imagenet_norm)  # (C, H, W)
 
     img_hwc = np.transpose(arr, (1, 2, 0))
     H, W = img_hwc.shape[:2]
