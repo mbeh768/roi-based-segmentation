@@ -131,6 +131,37 @@ class _UNetEncoder(nn.Module):
         return bot, (s1, s2, s3)
 
 
+class _GlobalShallowEncoder(nn.Module):
+    """
+    Shallow stack of 5×5 convolutions (no padding, no pooling) for the global branch.
+
+    Each layer shrinks spatial dims by 4 pixels. With num_layers=4 the receptive
+    field is 17×17 pixels — small enough that features remain spatially specific,
+    making the positional crop meaningful.
+
+    Input:  (B, 3,       H,          W)
+    Output: (B, out_ch,  H-4*layers, W-4*layers)
+    """
+    def __init__(self, out_ch=64, num_layers=32):
+        super().__init__()
+        layers = []
+        in_ch = 3
+        mid_ch = out_ch
+        for i in range(num_layers):
+            out = out_ch if i == num_layers - 1 else mid_ch
+            layers += [
+                nn.Conv2d(in_ch, out, kernel_size=5, padding=0, bias=False),
+                nn.GroupNorm(8, out),
+                nn.ReLU(inplace=True),
+            ]
+            in_ch = out
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)  # (B, out_ch, H', W')
+
+
+
 class _GlobalEncoder(nn.Module):
     """
     Feature extractor for the global branch.
@@ -234,6 +265,80 @@ class LocalGlobalUNet(BaseModel):
 
         return main
 
+
+class ImageNetUNetShallow(BaseModel):
+    """
+    Identical to ImageNetUNet but uses _GlobalShallowEncoder for the global branch.
+
+    _GlobalShallowEncoder applies num_layers of 5×5 no-padding convolutions,
+    preserving near-full spatial resolution (output: H - 4*num_layers).
+    For a 256×256 global image with num_layers=32 → 128×128 feature map,
+    giving a tile crop of ~16×16 before _crop_and_resize to H/32 bottleneck.
+
+    Config:
+        "arch": {"type": "ImageNetUNetShallow", "args": {"num_classes": 1}}
+    """
+    def __init__(self, num_classes=1, global_ch=64, global_layers=32):
+        super().__init__()
+
+        self.encoder = timm.create_model(
+            'resnet18', pretrained=True,
+            features_only=True, out_indices=(0, 1, 2, 3, 4),
+        )
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+
+        self.global_enc = _GlobalShallowEncoder(out_ch=global_ch, num_layers=global_layers)
+
+        self.bottleneck = _double_conv(512, 512)       # refine s4 @ H/32
+
+        self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
+        self.dec4 = _double_conv(256 + 256, 256)       # up + s3(256ch) → H/16
+
+        self.up3  = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec3 = _double_conv(128 + 128, 128)       # up + s2(128ch) → H/8
+
+        self.up2  = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec2 = _double_conv(64  +  64,  64)       # up + s1(64ch)  → H/4
+
+        self.up1  = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
+        self.dec1 = _double_conv(64  +  64,  64)       # up + s0(64ch)  → H/2
+
+        self.up0  = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
+        self.dec0 = _double_conv(32, 32)               # no skip        → H
+
+        self.head     = nn.Conv2d(32, num_classes, kernel_size=1)
+        self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos):
+        with torch.no_grad():
+            s0, s1, s2, s3, s4 = self.encoder(local)  # H/2, H/4, H/8, H/16, H/32
+
+        bot   = self.bottleneck(s4)                    # (B, 512, H/32, W/32)
+
+        g_feat = self.global_enc(glob)
+        g_ctx  = _crop_and_resize(g_feat, pos, *bot.shape[2:])
+
+        x = torch.cat([bot, g_ctx], dim=1)             # (B, 512+global_ch, H/32)
+
+        x = self.dec4(torch.cat([self.up4(x), s3], dim=1))  # (B, 256, H/16)
+        x = self.dec3(torch.cat([self.up3(x), s2], dim=1))  # (B, 128, H/8)
+        x = self.dec2(torch.cat([self.up2(x), s1], dim=1))  # (B,  64, H/4)
+        x = self.dec1(torch.cat([self.up1(x), s0], dim=1))  # (B,  64, H/2)
+        x = self.dec0(self.up0(x))                          # (B,  32, H)
+
+        main = self.head(x)
+
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear',
+                align_corners=True,
+            )
+            return main, aux
+
+        return main
 
 class ImageNetUNet(BaseModel):
     """
