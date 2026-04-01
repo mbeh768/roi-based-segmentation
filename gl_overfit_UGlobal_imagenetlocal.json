@@ -1,9 +1,9 @@
 {
-    "name": "[OVER] rn18_old_encoder_experiment",
+    "name": "[OVER] UnetGlobal_ImagenetLocal",
     "n_gpu": 1,
 
     "arch": {
-        "type": "ImageNetUNetShallow",
+        "type": "ImageNetUNet",
         "args": {"num_classes": 1}
     },
     "data_loader": {

@@ -203,26 +203,12 @@ class _GlobalUNet(nn.Module):
         return x
 
 
-class LocalGlobalUNet(BaseModel):
+class LocalGlobalUNet3Layer(BaseModel):
     """
-    UNet that jointly encodes a local tile and a downsampled global image.
-
-    Global context injected only at the bottleneck — global skips are dropped
-    because at fine scales the global image (full slide compressed to 256×256)
-    encodes different spatial detail than the local tile and adds noise.
-
-    pos (B, 4) = [y0, x0, y1, x1] normalised is used to crop the global
-    bottleneck to the tile's exact region, then resize to match the local
-    bottleneck via bilinear grid_sample. Without pos the full global
-    bottleneck is used unchanged.
-
-    Decoder uses only local skip connections, same channel counts as SimpleUNet.
-
-    Inputs: local (B, 3, H, W), glob (B, 3, H, W)
-    Output: (B, num_classes, H, W) raw logits
+    3-encoder-layer variant of LocalGlobalUNet. Bottleneck at H/8.
 
     Config:
-        "arch": {"type": "LocalGlobalUNet", "args": {"num_classes": 1}}
+        "arch": {"type": "LocalGlobalUNet3Layer", "args": {"num_classes": 1}}
     """
     def __init__(self, num_classes=1, global_ch=64):
         super().__init__()
@@ -245,17 +231,85 @@ class LocalGlobalUNet(BaseModel):
 
     def forward(self, local, glob, pos):
         l_bot, (l_s1, l_s2, l_s3) = self.local_enc(local)
-        g_feat = self.global_enc(glob)                               # (B, global_ch, H', W')
+        g_feat = self.global_enc(glob)
 
         g_ctx = _crop_and_resize(g_feat, pos, *l_bot.shape[2:])
+        x = torch.cat([l_bot, g_ctx], dim=1)                        # (B, 512+global_ch, H/8)
 
-        x = torch.cat([l_bot, g_ctx], dim=1)                        # (B, 512+global_ch, H/8, W/8)
+        x = self.dec3(torch.cat([self.up3(x), l_s3], dim=1))        # (B, 256, H/4)
+        x = self.dec2(torch.cat([self.up2(x), l_s2], dim=1))        # (B, 128, H/2)
+        x = self.dec1(torch.cat([self.up1(x), l_s1], dim=1))        # (B,  64, H)
 
-        x = self.dec3(torch.cat([self.up3(x), l_s3], dim=1))        # (B,  256, H/4)
-        x = self.dec2(torch.cat([self.up2(x), l_s2], dim=1))        # (B,  128, H/2)
-        x = self.dec1(torch.cat([self.up1(x), l_s1], dim=1))        # (B,   64, H)
+        main = self.head(x)
 
-        main = self.head(x)                                          # (B, num_classes, H, W)
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear', align_corners=True,
+            )
+            return main, aux
+        return main
+
+
+class LocalGlobalUNet(BaseModel):
+    """
+    4-encoder-layer LocalGlobalUNet. Bottleneck at H/16.
+
+    Encoder: 3→64→128→256→512, bottleneck 512→512 @ H/16.
+    Global context (_GlobalUNet output, H×W) cropped to the bottleneck spatial
+    size and concatenated before decoding.
+
+    Inputs: local (B, 3, H, W), glob (B, 3, H, W), pos (B, 4)
+    Output: (B, num_classes, H, W) raw logits
+
+    Config:
+        "arch": {"type": "LocalGlobalUNet", "args": {"num_classes": 1}}
+    """
+    def __init__(self, num_classes=1, global_ch=64):
+        super().__init__()
+
+        self.pool = nn.MaxPool2d(2)
+        self.enc1 = _double_conv(3,    64)
+        self.enc2 = _double_conv(64,  128)
+        self.enc3 = _double_conv(128, 256)
+        self.enc4 = _double_conv(256, 512)
+        self.bot  = _double_conv(512, 512)           # H/16
+
+        self.global_enc = _GlobalUNet(out_ch=global_ch)
+
+        self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
+        self.dec4 = _double_conv(256 + 512, 256)     # up + s4 → H/8
+
+        self.up3  = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec3 = _double_conv(128 + 256, 128)     # up + s3 → H/4
+
+        self.up2  = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec2 = _double_conv(64  + 128,  64)     # up + s2 → H/2
+
+        self.up1  = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
+        self.dec1 = _double_conv(64  +  64,  64)     # up + s1 → H
+
+        self.head     = nn.Conv2d(64, num_classes, kernel_size=1)
+        self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos):
+        s1 = self.enc1(local)                                        # (B,  64, H)
+        s2 = self.enc2(self.pool(s1))                                # (B, 128, H/2)
+        s3 = self.enc3(self.pool(s2))                                # (B, 256, H/4)
+        s4 = self.enc4(self.pool(s3))                                # (B, 512, H/8)
+        x  = self.bot(self.pool(s4))                                 # (B, 512, H/16)
+
+        g_feat = self.global_enc(glob)
+        g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
+        x = torch.cat([x, g_ctx], dim=1)                            # (B, 512+global_ch, H/16)
+
+        x = self.dec4(torch.cat([self.up4(x), s4], dim=1))          # (B, 256, H/8)
+        x = self.dec3(torch.cat([self.up3(x), s3], dim=1))          # (B, 128, H/4)
+        x = self.dec2(torch.cat([self.up2(x), s2], dim=1))          # (B,  64, H/2)
+        x = self.dec1(torch.cat([self.up1(x), s1], dim=1))          # (B,  64, H)
+
+        main = self.head(x)
 
         if self.training:
             aux = F.interpolate(
