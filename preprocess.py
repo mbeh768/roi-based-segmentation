@@ -49,6 +49,8 @@ class Preprocessor:
         '''
         dir = Path(self.c['preprocess']['raw_image_directory'])
 
+        print(f"searching:\t{str(dir)}")
+
         if nomask:
             i_paths = sorted(
                 glob(str(dir / "*/*.tif*")) +

@@ -481,3 +481,33 @@ class ImageNetUNet(BaseModel):
             return main, aux
 
         return main
+
+
+class SSLGlobalUNet(BaseModel):
+    """
+    Self-supervised wrapper around _GlobalUNet for pretraining.
+
+    The UNet produces dense 64-ch spatial features. Two lightweight 1x1 conv
+    heads project those features to RGB for two reconstruction tasks:
+      1) aug_head:   reverse augmentation on the full global image
+      2) local_head: reconstruct a local tile from features cropped at its position
+
+    After pretraining, transfer self.unet weights to LocalGlobalUNet.global_enc.
+
+    Config:
+        "arch": {"type": "SSLGlobalUNet", "args": {"out_ch": 64, "crop_size": 32}}
+    """
+    def __init__(self, out_ch=64, crop_size=32):
+        super().__init__()
+        self.unet = _GlobalUNet(out_ch=out_ch)
+        self.crop_size = crop_size
+        self.aug_head   = nn.Conv2d(out_ch, 3, kernel_size=1)
+        self.local_head = nn.Conv2d(out_ch, 3, kernel_size=1)
+
+    def forward(self, aug_global, pos):
+        feat = self.unet(aug_global)                                    # (B, out_ch, H, W)
+        global_recon = self.aug_head(feat)                              # (B, 3, H, W)
+        local_feat   = _crop_and_resize(feat, pos,
+                                        self.crop_size, self.crop_size) # (B, out_ch, cs, cs)
+        local_recon  = self.local_head(local_feat)                      # (B, 3, cs, cs)
+        return global_recon, local_recon

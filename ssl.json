@@ -1,0 +1,67 @@
+{
+    "name": "SSL_GlobalUNet_Pretrain",
+    "n_gpu": 1,
+
+    "arch": {
+        "type": "SSLGlobalUNet",
+        "args": {"out_ch": 64, "crop_size": 32}
+    },
+    "data_loader": {
+        "type": "SSLGlobalLocalDataLoader",
+        "args": {
+            "data_dir": "data/ssl",
+            "batch_size": 20,
+            "shuffle": true,
+            "validation_split": 0.2,
+            "num_workers": 2,
+            "crop_size": 32,
+            "noise_std": 0.1,
+            "color_scale_range": 0.2,
+            "blur_kernel": 5,
+            "cutout_ratio": 0.2
+        }
+    },
+    "optimizer": {
+        "type": "Adam",
+        "args": {
+            "lr": 3e-4,
+            "weight_decay": 0,
+            "amsgrad": true
+        }
+    },
+    "loss": "mse",
+    "metrics": [
+        "psnr"
+    ],
+    "lr_scheduler": {
+        "type": "CosineAnnealingLR",
+        "args": {
+            "T_max": 500,
+            "eta_min": 1e-5
+        }
+    },
+
+    "preprocess": {
+        "raw_image_directory": "/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26/Sirius Red Jan 2026 (infarcted pig hearts)",
+        "global_downsample": 256,
+        "czi_max_px": 5000000000,
+        "tiling_size": 2048,
+        "tile_size": 256,
+        "stride": 256,
+        "imagenet_norm": true
+    },
+
+    "trainer": {
+        "epochs": 500,
+
+        "save_dir": "saved/",
+        "save_period": 50,
+        "verbosity": 2,
+
+        "monitor": "min val_loss",
+        "early_stop": 50,
+
+        "tensorboard": true,
+        "local_loss_weight": 1.0
+    }
+}

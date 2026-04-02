@@ -3,7 +3,7 @@
     "n_gpu": 1,
 
     "arch": {
-        "type": "LocalGlobalUnet",
+        "type": "LocalGlobalUNet",
         "args": {"num_classes": 1}
     },
     "data_loader": {

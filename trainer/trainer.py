@@ -139,3 +139,143 @@ class Trainer(BaseTrainer):
             current = batch_idx
             total = self.len_epoch
         return base.format(current, total, 100.0 * current / total)
+
+
+class SSLTrainer(BaseTrainer):
+    """
+    Trainer for self-supervised _GlobalUNet pretraining.
+
+    Tracks global_loss and local_loss explicitly and logs input vs reconstruction
+    images to tensorboard.
+    """
+    def __init__(self, model, criterion, metric_ftns, optimizer, config, device,
+                 data_loader, valid_data_loader=None, lr_scheduler=None, len_epoch=None):
+        super().__init__(model, criterion, metric_ftns, optimizer, config)
+        self.config = config
+        self.device = device
+        self.data_loader = data_loader
+        if len_epoch is None:
+            self.len_epoch = len(self.data_loader)
+        else:
+            self.data_loader = inf_loop(data_loader)
+            self.len_epoch = len_epoch
+        self.valid_data_loader = valid_data_loader
+        self.do_validation = self.valid_data_loader is not None
+        self.lr_scheduler = lr_scheduler
+        self.log_step = int(np.sqrt(data_loader.batch_size))
+
+        self.local_loss_weight = config['trainer'].get('local_loss_weight', 1.0)
+
+        self.train_metrics = MetricTracker(
+            'loss', 'global_loss', 'local_loss',
+            *[m.__name__ for m in self.metric_ftns],
+            writer=self.writer,
+        )
+        self.valid_metrics = MetricTracker(
+            'loss', 'global_loss', 'local_loss',
+            *[m.__name__ for m in self.metric_ftns],
+            writer=self.writer,
+        )
+
+    def _denorm_for_vis(self, img):
+        """Clamp a CHW tensor to [0, 1] for tensorboard display.
+        Works whether the data is raw [0,1] or ImageNet-normalised."""
+        lo, hi = img.min(), img.max()
+        if hi - lo < 1e-6:
+            return torch.zeros_like(img)
+        return (img - lo) / (hi - lo)
+
+    def _train_epoch(self, epoch):
+        self.model.train()
+        self.train_metrics.reset()
+
+        for batch_idx, (aug_global, pos, clean_global, local_target) in enumerate(self.data_loader):
+            aug_global   = aug_global.to(self.device)
+            pos          = pos.to(self.device)
+            clean_global = clean_global.to(self.device)
+            local_target = local_target.to(self.device)
+
+            self.optimizer.zero_grad()
+            global_recon, local_recon = self.model(aug_global, pos)
+
+            global_loss = self.criterion(global_recon, clean_global)
+            local_loss  = self.criterion(local_recon, local_target)
+            loss = global_loss + self.local_loss_weight * local_loss
+
+            loss.backward()
+            self.optimizer.step()
+
+            self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
+            self.train_metrics.update('loss', loss.item())
+            self.train_metrics.update('global_loss', global_loss.item())
+            self.train_metrics.update('local_loss', local_loss.item())
+            for met in self.metric_ftns:
+                self.train_metrics.update(met.__name__, met(global_recon, clean_global))
+
+            if batch_idx % self.log_step == 0:
+                self.logger.debug('Train Epoch: {} {} Loss: {:.6f} (global: {:.6f}, local: {:.6f})'.format(
+                    epoch, self._progress(batch_idx),
+                    loss.item(), global_loss.item(), local_loss.item()))
+
+                n = min(8, aug_global.size(0))
+                vis_aug   = torch.stack([self._denorm_for_vis(aug_global[i])   for i in range(n)])
+                vis_clean = torch.stack([self._denorm_for_vis(clean_global[i]) for i in range(n)])
+                vis_grecon = torch.stack([self._denorm_for_vis(global_recon[i].detach()) for i in range(n)])
+                self.writer.add_image('ssl/augmented_input',      make_grid(vis_aug,    nrow=n))
+                self.writer.add_image('ssl/global_target',        make_grid(vis_clean,  nrow=n))
+                self.writer.add_image('ssl/global_reconstruction', make_grid(vis_grecon, nrow=n))
+
+                vis_ltarget = torch.stack([self._denorm_for_vis(local_target[i]) for i in range(n)])
+                vis_lrecon  = torch.stack([self._denorm_for_vis(local_recon[i].detach()) for i in range(n)])
+                self.writer.add_image('ssl/local_target',         make_grid(vis_ltarget, nrow=n))
+                self.writer.add_image('ssl/local_reconstruction', make_grid(vis_lrecon,  nrow=n))
+
+            if batch_idx == self.len_epoch:
+                break
+
+        log = self.train_metrics.result()
+
+        if self.do_validation:
+            val_log = self._valid_epoch(epoch)
+            log.update(**{'val_' + k: v for k, v in val_log.items()})
+
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.step()
+        return log
+
+    def _valid_epoch(self, epoch):
+        self.model.eval()
+        self.valid_metrics.reset()
+        with torch.no_grad():
+            for batch_idx, (aug_global, pos, clean_global, local_target) in enumerate(self.valid_data_loader):
+                aug_global   = aug_global.to(self.device)
+                pos          = pos.to(self.device)
+                clean_global = clean_global.to(self.device)
+                local_target = local_target.to(self.device)
+
+                global_recon, local_recon = self.model(aug_global, pos)
+
+                global_loss = self.criterion(global_recon, clean_global)
+                local_loss  = self.criterion(local_recon, local_target)
+                loss = global_loss + self.local_loss_weight * local_loss
+
+                self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
+                self.valid_metrics.update('loss', loss.item())
+                self.valid_metrics.update('global_loss', global_loss.item())
+                self.valid_metrics.update('local_loss', local_loss.item())
+                for met in self.metric_ftns:
+                    self.valid_metrics.update(met.__name__, met(global_recon, clean_global))
+
+        for name, p in self.model.named_parameters():
+            self.writer.add_histogram(name, p, bins='auto')
+        return self.valid_metrics.result()
+
+    def _progress(self, batch_idx):
+        base = '[{}/{} ({:.0f}%)]'
+        if hasattr(self.data_loader, 'n_samples'):
+            current = batch_idx * self.data_loader.batch_size
+            total = self.data_loader.n_samples
+        else:
+            current = batch_idx
+            total = self.len_epoch
+        return base.format(current, total, 100.0 * current / total)

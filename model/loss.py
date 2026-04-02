@@ -27,3 +27,11 @@ def bce_dice(output, target, a=0.3):
     dice = dice_loss(output, target)
     return a * _bce + (1 - a) * dice
 
+
+def mse(output, target):
+    return F.mse_loss(output, target)
+
+
+def l1(output, target):
+    return F.l1_loss(output, target)
+

@@ -1,6 +1,8 @@
 from pathlib import Path
 import json
+import random
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 
@@ -128,3 +130,105 @@ class LocalGlobalDataset(Dataset):
         global_mask = torch.load(global_mask_path, weights_only=True)
 
         return local, glob, pos, mask, global_mask
+
+
+class SSLGlobalLocalDataset(Dataset):
+    """
+    Self-supervised dataset for pretraining _GlobalUNet.
+
+    Returns (aug_global, pos, clean_global, local_target) where:
+        aug_global:   (3, H, W) augmented global image (model input)
+        pos:          (4,) normalised tile region [y0, x0, y1, x1]
+        clean_global: (3, H, W) original global image (global reconstruction target)
+        local_target: (3, crop_size, crop_size) downsampled local tile (local reconstruction target)
+
+    No masks needed -- works with --nomask preprocessed data.
+    """
+    def __init__(self, data_dir, crop_size=32,
+                 noise_std=0.1, color_scale_range=0.2,
+                 blur_kernel=5, cutout_ratio=0.2,
+                 p_noise=0.5, p_color=0.5, p_blur=0.3, p_cutout=0.3):
+        data_dir = Path(data_dir)
+        self.image_dir = data_dir / 'images'
+        self.crop_size = crop_size
+
+        # augmentation params
+        self.noise_std = noise_std
+        self.color_scale_range = color_scale_range
+        self.blur_kernel = blur_kernel
+        self.cutout_ratio = cutout_ratio
+        self.p_noise = p_noise
+        self.p_color = p_color
+        self.p_blur = p_blur
+        self.p_cutout = p_cutout
+
+        self.items = []
+        for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
+            stem = coords_file.parent.name
+            with open(coords_file) as f:
+                entries = json.load(f)
+            for entry in entries:
+                patch_path = coords_file.parent / entry['filename']
+                self.items.append((patch_path, stem, entry))
+
+        assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
+
+    def __len__(self):
+        return len(self.items)
+
+    def _augment(self, img):
+        """Apply random appearance-only augmentations to a (3, H, W) tensor."""
+        aug = img.clone()
+
+        # Gaussian noise
+        if random.random() < self.p_noise:
+            aug = aug + torch.randn_like(aug) * self.noise_std
+
+        # Per-channel color scaling
+        if random.random() < self.p_color:
+            scale = 1.0 + (torch.rand(3, 1, 1) * 2 - 1) * self.color_scale_range
+            aug = aug * scale
+
+        # Gaussian blur
+        if random.random() < self.p_blur:
+            k = self.blur_kernel
+            sigma = random.uniform(0.1, 2.0)
+            # build 1-D Gaussian kernel
+            ax = torch.arange(k, dtype=torch.float32) - k // 2
+            kernel_1d = torch.exp(-0.5 * (ax / sigma) ** 2)
+            kernel_1d = kernel_1d / kernel_1d.sum()
+            kernel_2d = kernel_1d.unsqueeze(1) * kernel_1d.unsqueeze(0)        # (k, k)
+            kernel_2d = kernel_2d.expand(3, 1, k, k)                           # (3, 1, k, k)
+            pad = k // 2
+            aug = F.conv2d(aug.unsqueeze(0), kernel_2d, padding=pad, groups=3).squeeze(0)
+
+        # Random erasing (cutout)
+        if random.random() < self.p_cutout:
+            _, H, W = aug.shape
+            eh = int(H * self.cutout_ratio)
+            ew = int(W * self.cutout_ratio)
+            y = random.randint(0, H - eh)
+            x = random.randint(0, W - ew)
+            aug[:, y:y + eh, x:x + ew] = 0.0
+
+        return aug
+
+    def __getitem__(self, idx):
+        patch_path, stem, entry = self.items[idx]
+
+        clean_global = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
+        aug_global = self._augment(clean_global)
+
+        H, W = entry['image_H'], entry['image_W']
+        y, x = entry['y'], entry['x']
+        h, w = entry['height'], entry['width']
+        pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
+
+        local_tile = torch.load(patch_path, weights_only=True)   # (3, 256, 256)
+        local_target = F.interpolate(
+            local_tile.unsqueeze(0),
+            size=(self.crop_size, self.crop_size),
+            mode='bilinear', align_corners=True,
+        ).squeeze(0)   # (3, crop_size, crop_size)
+
+        return aug_global, pos, clean_global, local_target
