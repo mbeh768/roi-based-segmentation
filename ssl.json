@@ -1,5 +1,5 @@
 {
-    "name": "SSL_GlobalUNet_Pretrain",
+    "name": "SSL_GlobalUNet_FL-SIRIUS",
     "n_gpu": 1,
 
     "arch": {
@@ -48,7 +48,8 @@
         "tiling_size": 2048,
         "tile_size": 256,
         "stride": 256,
-        "imagenet_norm": true
+        "imagenet_norm": true,
+        "handle_missing_or_additional_channels": true
     },
 
     "trainer": {

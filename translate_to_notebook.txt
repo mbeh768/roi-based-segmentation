@@ -1,0 +1,6 @@
+preceeding and following conv layer produced usable segmentation, now trying using a proper names csv!!!!
+also goign to mix in as many unlabeled fluoresence as i can so we can get some of those features
+
+failure
+[17P645-1], that is okay, segmentation is not classic
+[AJKY121-9-1], not really acceptable, but segmentation was usable

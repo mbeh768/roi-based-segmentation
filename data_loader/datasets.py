@@ -147,7 +147,8 @@ class SSLGlobalLocalDataset(Dataset):
     def __init__(self, data_dir, crop_size=32,
                  noise_std=0.1, color_scale_range=0.2,
                  blur_kernel=5, cutout_ratio=0.2,
-                 p_noise=0.5, p_color=0.5, p_blur=0.3, p_cutout=0.3):
+                 p_noise=0.5, p_color=0.5, p_blur=0.3, p_cutout=0.3,
+                 p_channel_drop=0.3):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.crop_size = crop_size
@@ -161,6 +162,7 @@ class SSLGlobalLocalDataset(Dataset):
         self.p_color = p_color
         self.p_blur = p_blur
         self.p_cutout = p_cutout
+        self.p_channel_drop = p_channel_drop
 
         self.items = []
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
@@ -210,6 +212,11 @@ class SSLGlobalLocalDataset(Dataset):
             y = random.randint(0, H - eh)
             x = random.randint(0, W - ew)
             aug[:, y:y + eh, x:x + ew] = 0.0
+
+        # Random channel removal
+        if random.random() < self.p_channel_drop:
+            ch = random.randint(0, 2)
+            aug[ch] = 0.0
 
         return aug
 

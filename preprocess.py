@@ -166,6 +166,28 @@ class Preprocessor:
                 print(f"\topenslide failed ({type(e).__name__}), falling back to tifffile")
                 image = self._load_tif_tifffile(path)
 
+        # enforce 3-channel images (CHW at this point)
+        if not is_mask and image.shape[0] != 3:
+            handle = self.c['preprocess'].get('handle_missing_or_additional_channels', False)
+            if not handle:
+                raise ValueError(
+                    f"{path.name}: expected 3 channels, got {image.shape[0]}. "
+                    f"Set preprocess.handle_missing_or_additional_channels=true to auto-fix."
+                )
+            C = image.shape[0]
+            if C > 3:
+                # drop channels with lowest mean until 3 remain
+                means = [image[c].mean() for c in range(C)]
+                keep = sorted(range(C), key=lambda c: means[c], reverse=True)[:3]
+                keep.sort()  # preserve original channel order
+                print(f"\t{path.name}: {C} channels, dropping ch {[c for c in range(C) if c not in keep]} (lowest avg)")
+                image = image[keep]
+            else:
+                # pad with zero channels to reach 3
+                print(f"\t{path.name}: {C} channels, padding with {3 - C} zero channel(s)")
+                pad = np.zeros((3 - C, image.shape[1], image.shape[2]), dtype=image.dtype)
+                image = np.concatenate([image, pad], axis=0)
+
         # CHW -> HWC for cv2
         image = np.transpose(image, (1, 2, 0))
 
