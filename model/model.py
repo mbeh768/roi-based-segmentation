@@ -483,6 +483,83 @@ class ImageNetUNet(BaseModel):
         return main
 
 
+class PretrainedLocalGlobalUNet(BaseModel):
+    """
+    Identical to LocalGlobalUNet but loads SSL-pretrained weights into global_enc.
+
+    Config:
+        "arch": {"type": "PretrainedLocalGlobalUNet", "args": {
+            "num_classes": 1,
+            "ssl_checkpoint": "saved/models/SSL_.../checkpoint-epoch50.pth"
+        }}
+    """
+    def __init__(self, num_classes=1, global_ch=64, ssl_checkpoint=None):
+        super().__init__()
+
+        self.pool = nn.MaxPool2d(2)
+        self.enc1 = _double_conv(3,    64)
+        self.enc2 = _double_conv(64,  128)
+        self.enc3 = _double_conv(128, 256)
+        self.enc4 = _double_conv(256, 512)
+        self.bot  = _double_conv(512, 512)           # H/16
+
+        self.global_enc = _GlobalUNet(out_ch=global_ch)
+
+        if ssl_checkpoint is not None:
+            ckpt = torch.load(ssl_checkpoint, map_location='cpu', weights_only=False)
+            ssl_sd = ckpt['state_dict']
+            global_enc_sd = {k.replace('unet.', ''): v
+                             for k, v in ssl_sd.items() if k.startswith('unet.')}
+            self.global_enc.load_state_dict(global_enc_sd)
+            for p in self.global_enc.parameters():
+                p.requires_grad = False
+            print(f"[PretrainedLocalGlobalUNet] Loaded & froze SSL global_enc from {ssl_checkpoint}")
+
+        self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
+        self.dec4 = _double_conv(256 + 512, 256)     # up + s4 → H/8
+
+        self.up3  = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec3 = _double_conv(128 + 256, 128)     # up + s3 → H/4
+
+        self.up2  = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec2 = _double_conv(64  + 128,  64)     # up + s2 → H/2
+
+        self.up1  = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
+        self.dec1 = _double_conv(64  +  64,  64)     # up + s1 → H
+
+        self.head     = nn.Conv2d(64, num_classes, kernel_size=1)
+        self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos):
+        s1 = self.enc1(local)                                        # (B,  64, H)
+        s2 = self.enc2(self.pool(s1))                                # (B, 128, H/2)
+        s3 = self.enc3(self.pool(s2))                                # (B, 256, H/4)
+        s4 = self.enc4(self.pool(s3))                                # (B, 512, H/8)
+        x  = self.bot(self.pool(s4))                                 # (B, 512, H/16)
+
+        g_feat = self.global_enc(glob)
+        g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
+        x = torch.cat([x, g_ctx], dim=1)                            # (B, 512+global_ch, H/16)
+
+        x = self.dec4(torch.cat([self.up4(x), s4], dim=1))          # (B, 256, H/8)
+        x = self.dec3(torch.cat([self.up3(x), s3], dim=1))          # (B, 128, H/4)
+        x = self.dec2(torch.cat([self.up2(x), s2], dim=1))          # (B,  64, H/2)
+        x = self.dec1(torch.cat([self.up1(x), s1], dim=1))          # (B,  64, H)
+
+        main = self.head(x)
+
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear',
+                align_corners=True,
+            )
+            return main, aux
+
+        return main
+
+
 class SSLGlobalUNet(BaseModel):
     """
     Self-supervised wrapper around _GlobalUNet for pretraining.
