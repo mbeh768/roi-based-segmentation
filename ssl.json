@@ -42,7 +42,7 @@
     },
 
     "preprocess": {
-        "raw_image_directory": "/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26/Sirius Red Jan 2026 (infarcted pig hearts)",
+        "raw_image_directory": "/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26",
         "global_downsample": 256,
         "czi_max_px": 5000000000,
         "tiling_size": 2048,

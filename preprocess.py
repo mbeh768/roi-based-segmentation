@@ -123,13 +123,27 @@ class Preprocessor:
             bb = czidoc.total_bounding_box
             H = bb['Y'][1] - bb['Y'][0]
             W = bb['X'][1] - bb['X'][0]
+            n_channels = bb['C'][1] - bb['C'][0] if 'C' in bb else 1
             zoom = 1.0
             while zoom > 0.0 and (H * zoom) * (W * zoom) > _max_czi_px:
                 zoom *= 0.5
-            print(f"\tczi image dimensions: {H}x{W} ({H*W:.2e} px), pyramid zoom: {zoom} -> {int(H*zoom)}x{int(W*zoom)} ({H*zoom*W*zoom:.2e} px)\n")
+            print(f"\tczi image dimensions: {H}x{W} ({H*W:.2e} px), {n_channels} channel(s), pyramid zoom: {zoom} -> {int(H*zoom)}x{int(W*zoom)} ({H*zoom*W*zoom:.2e} px)\n")
             scenes = list(czidoc.scenes_bounding_rectangle.keys())
             scene = scenes[0] if scenes else None
-            data = czidoc.read(scene=scene, zoom=zoom)    # (H, W, C)
+
+            # read each channel separately and stack — read() without
+            # a plane coordinate defaults to C=0 only
+            channels = []
+            for c in range(n_channels):
+                plane = czidoc.read(plane={'C': c}, scene=scene, zoom=zoom)
+                if plane.ndim == 3:
+                    channels.append(plane)            # (H, W, 1) or (H, W, >=1)
+                else:
+                    channels.append(plane[:, :, np.newaxis])  # (H, W) -> (H, W, 1)
+            data = np.concatenate(channels, axis=2)   # (H, W, total_C)
+
+        C = data.shape[2]
+        print(f"\tczi loaded: shape {data.shape} ({C} channel{'s' if C != 1 else ''})")
 
         data = np.transpose(data, (2, 0, 1))              # CHW
 

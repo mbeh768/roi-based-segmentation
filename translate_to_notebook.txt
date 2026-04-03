@@ -1,5 +1,5 @@
 preceeding and following conv layer produced usable segmentation, now trying using a proper names csv!!!!
-also goign to mix in as many unlabeled fluoresence as i can so we can get some of those features
+im doing ssl now just pointint to '/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26' which is the entireity of images provided on march 14. This may include duplicates which will muddle results
 
 failure
 [17P645-1], that is okay, segmentation is not classic
