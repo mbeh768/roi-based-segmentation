@@ -515,6 +515,17 @@ class PretrainedLocalGlobalUNet(BaseModel):
                 p.requires_grad = False
             print(f"[PretrainedLocalGlobalUNet] Loaded & froze SSL global_enc from {ssl_checkpoint}")
 
+        self.global_pre = nn.Sequential(
+            nn.Conv2d(global_ch, global_ch, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(8, global_ch),
+            nn.ReLU(inplace=True),
+        )
+        self.global_post = nn.Sequential(
+            nn.Conv2d(global_ch, global_ch, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(8, global_ch),
+            nn.ReLU(inplace=True),
+        )
+
         self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
         self.dec4 = _double_conv(256 + 512, 256)     # up + s4 → H/8
 
@@ -538,7 +549,9 @@ class PretrainedLocalGlobalUNet(BaseModel):
         x  = self.bot(self.pool(s4))                                 # (B, 512, H/16)
 
         g_feat = self.global_enc(glob)
+        g_feat = self.global_pre(g_feat)                                # trainable 3x3 before crop
         g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
+        g_ctx  = self.global_post(g_ctx)                                # trainable 3x3 after crop
         x = torch.cat([x, g_ctx], dim=1)                            # (B, 512+global_ch, H/16)
 
         x = self.dec4(torch.cat([self.up4(x), s4], dim=1))          # (B, 256, H/8)

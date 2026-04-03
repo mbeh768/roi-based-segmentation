@@ -1,5 +1,5 @@
 {
-    "name": "[OVER] pretrainedGlobal_TrainableLocal",
+    "name": "[OVER] adaptedGlobal_TrainableLocal",
     "n_gpu": 1,
 
     "arch": {
