@@ -196,7 +196,7 @@ class SSLTrainer(BaseTrainer):
             local_target = local_target.to(self.device)
 
             self.optimizer.zero_grad()
-            global_recon, local_recon = self.model(aug_global, pos)
+            global_recon, local_recon = self.model(aug_global, pos, local_target)
 
             global_loss = self.criterion(global_recon, clean_global)
             local_loss  = self.criterion(local_recon, local_target)
@@ -253,7 +253,7 @@ class SSLTrainer(BaseTrainer):
                 clean_global = clean_global.to(self.device)
                 local_target = local_target.to(self.device)
 
-                global_recon, local_recon = self.model(aug_global, pos)
+                global_recon, local_recon = self.model(aug_global, pos, local_target)
 
                 global_loss = self.criterion(global_recon, clean_global)
                 local_loss  = self.criterion(local_recon, local_target)

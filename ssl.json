@@ -4,7 +4,7 @@
 
     "arch": {
         "type": "SSLGlobalUNet",
-        "args": {"out_ch": 64, "crop_size": 32}
+        "args": {"out_ch": 64, "bottleneck_ch": 16}
     },
     "data_loader": {
         "type": "SSLGlobalLocalDataLoader",

@@ -515,17 +515,6 @@ class PretrainedLocalGlobalUNet(BaseModel):
                 p.requires_grad = False
             print(f"[PretrainedLocalGlobalUNet] Loaded & froze SSL global_enc from {ssl_checkpoint}")
 
-        self.global_pre = nn.Sequential(
-            nn.Conv2d(global_ch, global_ch, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(8, global_ch),
-            nn.ReLU(inplace=True),
-        )
-        self.global_post = nn.Sequential(
-            nn.Conv2d(global_ch, global_ch, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(8, global_ch),
-            nn.ReLU(inplace=True),
-        )
-
         self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
         self.dec4 = _double_conv(256 + 512, 256)     # up + s4 → H/8
 
@@ -548,10 +537,8 @@ class PretrainedLocalGlobalUNet(BaseModel):
         s4 = self.enc4(self.pool(s3))                                # (B, 512, H/8)
         x  = self.bot(self.pool(s4))                                 # (B, 512, H/16)
 
-        g_feat = self.global_enc(glob)
-        g_feat = self.global_pre(g_feat)                                # trainable 3x3 before crop
+        g_feat = self.global_enc(glob)                            
         g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
-        g_ctx  = self.global_post(g_ctx)                                # trainable 3x3 after crop
         x = torch.cat([x, g_ctx], dim=1)                            # (B, 512+global_ch, H/16)
 
         x = self.dec4(torch.cat([self.up4(x), s4], dim=1))          # (B, 256, H/8)
@@ -585,19 +572,34 @@ class SSLGlobalUNet(BaseModel):
     After pretraining, transfer self.unet weights to LocalGlobalUNet.global_enc.
 
     Config:
-        "arch": {"type": "SSLGlobalUNet", "args": {"out_ch": 64, "crop_size": 32}}
+        "arch": {"type": "SSLGlobalUNet", "args": {"out_ch": 64, "bottleneck_ch": 16}}
     """
-    def __init__(self, out_ch=64, crop_size=32):
+    def __init__(self, out_ch=64, bottleneck_ch=16):
         super().__init__()
         self.unet = _GlobalUNet(out_ch=out_ch)
-        self.crop_size = crop_size
-        self.aug_head   = nn.Conv2d(out_ch, 3, kernel_size=1)
-        self.local_head = nn.Conv2d(out_ch, 3, kernel_size=1)
+        # information bottleneck — forces UNet to learn compressed features
+        self.bottleneck = nn.Sequential(
+            nn.Conv2d(out_ch, bottleneck_ch, kernel_size=1, bias=False),
+            nn.BatchNorm2d(bottleneck_ch),
+            nn.ReLU(inplace=True),
+        )
+        # throwaway decoder heads — discarded with bottleneck after pretraining
+        self.global_head = nn.Sequential(
+            _double_conv(bottleneck_ch, out_ch),
+            _double_conv(out_ch, out_ch),
+            nn.Conv2d(out_ch, 3, kernel_size=1),
+        )
+        self.local_head = nn.Sequential(
+            _double_conv(bottleneck_ch, out_ch),
+            _double_conv(out_ch, out_ch),
+            nn.Conv2d(out_ch, 3, kernel_size=1),
+        )
 
-    def forward(self, aug_global, pos):
+    def forward(self, aug_global, pos, local_target):
         feat = self.unet(aug_global)                                    # (B, out_ch, H, W)
-        global_recon = self.aug_head(feat)                              # (B, 3, H, W)
-        local_feat   = _crop_and_resize(feat, pos,
-                                        self.crop_size, self.crop_size) # (B, out_ch, cs, cs)
-        local_recon  = self.local_head(local_feat)                      # (B, 3, cs, cs)
+        z = self.bottleneck(feat)                                       # (B, bottleneck_ch, H, W)
+        global_recon = self.global_head(z)                              # (B, 3, H, W)
+        cs = local_target.shape[-1]
+        local_z = _crop_and_resize(z, pos, cs, cs)                     # (B, bottleneck_ch, cs, cs)
+        local_recon  = self.local_head(local_z)                         # (B, 3, cs, cs)
         return global_recon, local_recon

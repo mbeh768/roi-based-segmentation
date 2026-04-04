@@ -3,6 +3,7 @@ import json
 import random
 import torch
 import torch.nn.functional as F
+import torchvision.transforms as T
 from torch.utils.data import Dataset
 
 
@@ -153,16 +154,12 @@ class SSLGlobalLocalDataset(Dataset):
         self.image_dir = data_dir / 'images'
         self.crop_size = crop_size
 
-        # augmentation params
-        self.noise_std = noise_std
-        self.color_scale_range = color_scale_range
-        self.blur_kernel = blur_kernel
-        self.cutout_ratio = cutout_ratio
-        self.p_noise = p_noise
-        self.p_color = p_color
-        self.p_blur = p_blur
-        self.p_cutout = p_cutout
-        self.p_channel_drop = p_channel_drop
+        self.transform = T.Compose([
+            T.RandomApply([T.Lambda(lambda x: x + torch.randn_like(x) * noise_std)], p=p_noise),
+            T.RandomApply([T.Lambda(lambda x: x * (1.0 + (torch.rand(3, 1, 1) * 2 - 1) * color_scale_range))], p=p_color),
+            T.RandomApply([T.GaussianBlur(kernel_size=blur_kernel, sigma=(0.1, 2.0))], p=p_blur),
+            T.RandomApply([T.Lambda(lambda x: x.index_fill(0, torch.tensor([random.randint(0, 2)]), 0.0))], p=p_channel_drop),
+        ])
 
         self.items = []
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
@@ -180,45 +177,7 @@ class SSLGlobalLocalDataset(Dataset):
 
     def _augment(self, img):
         """Apply random appearance-only augmentations to a (3, H, W) tensor."""
-        aug = img.clone()
-
-        # Gaussian noise
-        if random.random() < self.p_noise:
-            aug = aug + torch.randn_like(aug) * self.noise_std
-
-        # Per-channel color scaling
-        if random.random() < self.p_color:
-            scale = 1.0 + (torch.rand(3, 1, 1) * 2 - 1) * self.color_scale_range
-            aug = aug * scale
-
-        # Gaussian blur
-        if random.random() < self.p_blur:
-            k = self.blur_kernel
-            sigma = random.uniform(0.1, 2.0)
-            # build 1-D Gaussian kernel
-            ax = torch.arange(k, dtype=torch.float32) - k // 2
-            kernel_1d = torch.exp(-0.5 * (ax / sigma) ** 2)
-            kernel_1d = kernel_1d / kernel_1d.sum()
-            kernel_2d = kernel_1d.unsqueeze(1) * kernel_1d.unsqueeze(0)        # (k, k)
-            kernel_2d = kernel_2d.expand(3, 1, k, k)                           # (3, 1, k, k)
-            pad = k // 2
-            aug = F.conv2d(aug.unsqueeze(0), kernel_2d, padding=pad, groups=3).squeeze(0)
-
-        # Random erasing (cutout)
-        if random.random() < self.p_cutout:
-            _, H, W = aug.shape
-            eh = int(H * self.cutout_ratio)
-            ew = int(W * self.cutout_ratio)
-            y = random.randint(0, H - eh)
-            x = random.randint(0, W - ew)
-            aug[:, y:y + eh, x:x + ew] = 0.0
-
-        # Random channel removal
-        if random.random() < self.p_channel_drop:
-            ch = random.randint(0, 2)
-            aug[ch] = 0.0
-
-        return aug
+        return self.transform(img.clone())
 
     def __getitem__(self, idx):
         patch_path, stem, entry = self.items[idx]
