@@ -1,10 +1,10 @@
 {
-    "name": "SSL_GlobalUNet_FL-SIRIUS",
+    "name": "bottleneckssl",
     "n_gpu": 1,
 
     "arch": {
         "type": "SSLGlobalUNet",
-        "args": {"out_ch": 64, "bottleneck_ch": 16}
+        "args": {"out_ch": 64}
     },
     "data_loader": {
         "type": "SSLGlobalLocalDataLoader",
@@ -17,8 +17,7 @@
             "crop_size": 32,
             "noise_std": 0.1,
             "color_scale_range": 0.2,
-            "blur_kernel": 5,
-            "cutout_ratio": 0.2
+            "blur_kernel": 5
         }
     },
     "optimizer": {
@@ -56,13 +55,14 @@
         "epochs": 500,
 
         "save_dir": "saved/",
-        "save_period": 50,
+        "save_period": 10,
         "verbosity": 2,
 
         "monitor": "min val_loss",
         "early_stop": 50,
 
         "tensorboard": true,
-        "local_loss_weight": 1.0
+        "local_loss_weight": 1.0,
+        "feat_reg_weight": 0.1
     }
 }

@@ -1,12 +1,12 @@
 {
-    "name": "[OVER] adaptedGlobalgoodssl_TrainableLocal",
+    "name": "[OVER] bottleneckssl_glob",
     "n_gpu": 1,
 
     "arch": {
         "type": "PretrainedLocalGlobalUNet",
         "args": {
             "num_classes": 1,
-            "ssl_checkpoint": "saved/models/SSL_GlobalUNet_FL-SIRIUS/0403_172513/checkpoint-epoch50.pth"
+            "ssl_checkpoint": "saved/models/bottleneckssl/0404_110655/checkpoint-epoch90.pth"
         }
     },
     "data_loader": {

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torchvision.utils import make_grid
 from base import BaseTrainer
+from model.loss import vicreg_features
 from utils import inf_loop, MetricTracker
 
 
@@ -165,9 +166,10 @@ class SSLTrainer(BaseTrainer):
         self.log_step = int(np.sqrt(data_loader.batch_size))
 
         self.local_loss_weight = config['trainer'].get('local_loss_weight', 1.0)
+        self.feat_reg_weight = config['trainer'].get('feat_reg_weight', 0.1)
 
         self.train_metrics = MetricTracker(
-            'loss', 'global_loss', 'local_loss',
+            'loss', 'global_loss', 'local_loss', 'feat_reg',
             *[m.__name__ for m in self.metric_ftns],
             writer=self.writer,
         )
@@ -196,11 +198,14 @@ class SSLTrainer(BaseTrainer):
             local_target = local_target.to(self.device)
 
             self.optimizer.zero_grad()
-            global_recon, local_recon = self.model(aug_global, pos, local_target)
+            global_recon, local_recon, feat = self.model(aug_global, pos, local_target)
 
             global_loss = self.criterion(global_recon, clean_global)
             local_loss  = self.criterion(local_recon, local_target)
-            loss = global_loss + self.local_loss_weight * local_loss
+            feat_reg    = vicreg_features(feat)
+            loss = (global_loss
+                    + self.local_loss_weight * local_loss
+                    + self.feat_reg_weight * feat_reg)
 
             loss.backward()
             self.optimizer.step()
@@ -209,6 +214,7 @@ class SSLTrainer(BaseTrainer):
             self.train_metrics.update('loss', loss.item())
             self.train_metrics.update('global_loss', global_loss.item())
             self.train_metrics.update('local_loss', local_loss.item())
+            self.train_metrics.update('feat_reg', feat_reg.item())
             for met in self.metric_ftns:
                 self.train_metrics.update(met.__name__, met(global_recon, clean_global))
 
@@ -253,11 +259,14 @@ class SSLTrainer(BaseTrainer):
                 clean_global = clean_global.to(self.device)
                 local_target = local_target.to(self.device)
 
-                global_recon, local_recon = self.model(aug_global, pos, local_target)
+                global_recon, local_recon, feat = self.model(aug_global, pos, local_target)
 
                 global_loss = self.criterion(global_recon, clean_global)
                 local_loss  = self.criterion(local_recon, local_target)
-                loss = global_loss + self.local_loss_weight * local_loss
+                feat_reg    = vicreg_features(feat)
+                loss = (global_loss
+                        + self.local_loss_weight * local_loss
+                        + self.feat_reg_weight * feat_reg)
 
                 self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.valid_metrics.update('loss', loss.item())

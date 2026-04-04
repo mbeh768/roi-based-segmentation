@@ -147,8 +147,8 @@ class SSLGlobalLocalDataset(Dataset):
     """
     def __init__(self, data_dir, crop_size=32,
                  noise_std=0.1, color_scale_range=0.2,
-                 blur_kernel=5, cutout_ratio=0.2,
-                 p_noise=0.5, p_color=0.5, p_blur=0.3, p_cutout=0.3,
+                 blur_kernel=5,
+                 p_noise=0.5, p_color=0.5, p_blur=0.3,
                  p_channel_drop=0.3):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'

@@ -572,34 +572,27 @@ class SSLGlobalUNet(BaseModel):
     After pretraining, transfer self.unet weights to LocalGlobalUNet.global_enc.
 
     Config:
-        "arch": {"type": "SSLGlobalUNet", "args": {"out_ch": 64, "bottleneck_ch": 16}}
+        "arch": {"type": "SSLGlobalUNet", "args": {"out_ch": 64}}
     """
-    def __init__(self, out_ch=64, bottleneck_ch=16):
+    def __init__(self, out_ch=64):
         super().__init__()
         self.unet = _GlobalUNet(out_ch=out_ch)
-        # information bottleneck — forces UNet to learn compressed features
-        self.bottleneck = nn.Sequential(
-            nn.Conv2d(out_ch, bottleneck_ch, kernel_size=1, bias=False),
-            nn.BatchNorm2d(bottleneck_ch),
-            nn.ReLU(inplace=True),
-        )
-        # throwaway decoder heads — discarded with bottleneck after pretraining
+        # throwaway decoder heads — discarded after pretraining
         self.global_head = nn.Sequential(
-            _double_conv(bottleneck_ch, out_ch),
+            _double_conv(out_ch, out_ch),
             _double_conv(out_ch, out_ch),
             nn.Conv2d(out_ch, 3, kernel_size=1),
         )
         self.local_head = nn.Sequential(
-            _double_conv(bottleneck_ch, out_ch),
+            _double_conv(out_ch, out_ch),
             _double_conv(out_ch, out_ch),
             nn.Conv2d(out_ch, 3, kernel_size=1),
         )
 
     def forward(self, aug_global, pos, local_target):
         feat = self.unet(aug_global)                                    # (B, out_ch, H, W)
-        z = self.bottleneck(feat)                                       # (B, bottleneck_ch, H, W)
-        global_recon = self.global_head(z)                              # (B, 3, H, W)
+        global_recon = self.global_head(feat)                           # (B, 3, H, W)
         cs = local_target.shape[-1]
-        local_z = _crop_and_resize(z, pos, cs, cs)                     # (B, bottleneck_ch, cs, cs)
-        local_recon  = self.local_head(local_z)                         # (B, 3, cs, cs)
-        return global_recon, local_recon
+        local_feat = _crop_and_resize(feat, pos, cs, cs)               # (B, out_ch, cs, cs)
+        local_recon  = self.local_head(local_feat)                      # (B, 3, cs, cs)
+        return global_recon, local_recon, feat

@@ -32,6 +32,35 @@ def mse(output, target):
     return F.mse_loss(output, target)
 
 
+def vicreg_features(feat, var_weight=1.0, cov_weight=0.04):
+    """
+    VICReg-style variance + covariance regularization on feature maps.
+
+    Args:
+        feat: (B, C, H, W) feature tensor
+        var_weight: weight for variance term (encourages each channel to be active)
+        cov_weight: weight for covariance term (encourages channels to be decorrelated)
+
+    Returns:
+        scalar loss
+    """
+    C = feat.shape[1]
+    # flatten spatial dims: (B, C, H, W) -> (N, C)
+    x = feat.permute(0, 2, 3, 1).reshape(-1, C)
+
+    # variance: penalize channels whose std falls below 1
+    std = torch.sqrt(x.var(dim=0) + 1e-4)
+    var_loss = F.relu(1.0 - std).mean()
+
+    # covariance: penalize off-diagonal correlations
+    x = x - x.mean(dim=0)
+    cov = (x.T @ x) / (x.shape[0] - 1)        # (C, C)
+    off_diag = cov - torch.diag(cov.diag())
+    cov_loss = (off_diag ** 2).sum() / C
+
+    return var_weight * var_loss + cov_weight * cov_loss
+
+
 def l1(output, target):
     return F.l1_loss(output, target)
 

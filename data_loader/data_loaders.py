@@ -54,13 +54,15 @@ class LocalGlobalDataLoader(BaseDataLoader):
 class SSLGlobalLocalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1,
                  crop_size=32, noise_std=0.1, color_scale_range=0.2,
-                 blur_kernel=5, cutout_ratio=0.2,
-                 p_noise=0.5, p_color=0.5, p_blur=0.3, p_cutout=0.3):
+                 blur_kernel=5,
+                 p_noise=0.5, p_color=0.5, p_blur=0.3,
+                 p_channel_drop=0.3):
         self.dataset = SSLGlobalLocalDataset(
             data_dir, crop_size=crop_size,
             noise_std=noise_std, color_scale_range=color_scale_range,
-            blur_kernel=blur_kernel, cutout_ratio=cutout_ratio,
-            p_noise=p_noise, p_color=p_color, p_blur=p_blur, p_cutout=p_cutout,
+            blur_kernel=blur_kernel,
+            p_noise=p_noise, p_color=p_color, p_blur=p_blur,
+            p_channel_drop=p_channel_drop,
         )
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
