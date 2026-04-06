@@ -517,9 +517,9 @@ class PretrainedLocalGlobalUNet(BaseModel):
             for p in self.global_enc.enc1.parameters():
                 p.requires_grad = True
             for p in self.global_enc.dec1.parameters():
-                p.requires_grad = True
+                p.requires_grad = False
             for p in self.global_enc.up1.parameters():
-                p.requires_grad = True
+                p.requires_grad = False
             print(f"[PretrainedLocalGlobalUNet] Loaded SSL global_enc from {ssl_checkpoint} "
                   f"(enc1/dec1/up1 unfrozen)")
 
