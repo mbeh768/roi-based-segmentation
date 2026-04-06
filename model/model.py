@@ -511,9 +511,17 @@ class PretrainedLocalGlobalUNet(BaseModel):
             global_enc_sd = {k.replace('unet.', ''): v
                              for k, v in ssl_sd.items() if k.startswith('unet.')}
             self.global_enc.load_state_dict(global_enc_sd)
+            # freeze all, then unfreeze first encoder + last decoder
             for p in self.global_enc.parameters():
                 p.requires_grad = False
-            print(f"[PretrainedLocalGlobalUNet] Loaded & froze SSL global_enc from {ssl_checkpoint}")
+            for p in self.global_enc.enc1.parameters():
+                p.requires_grad = True
+            for p in self.global_enc.dec1.parameters():
+                p.requires_grad = True
+            for p in self.global_enc.up1.parameters():
+                p.requires_grad = True
+            print(f"[PretrainedLocalGlobalUNet] Loaded SSL global_enc from {ssl_checkpoint} "
+                  f"(enc1/dec1/up1 unfrozen)")
 
         self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
         self.dec4 = _double_conv(256 + 512, 256)     # up + s4 → H/8
@@ -537,7 +545,7 @@ class PretrainedLocalGlobalUNet(BaseModel):
         s4 = self.enc4(self.pool(s3))                                # (B, 512, H/8)
         x  = self.bot(self.pool(s4))                                 # (B, 512, H/16)
 
-        g_feat = self.global_enc(glob)                            
+        g_feat = self.global_enc(glob)
         g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
         x = torch.cat([x, g_ctx], dim=1)                            # (B, 512+global_ch, H/16)
 
