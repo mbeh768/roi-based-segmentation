@@ -248,6 +248,12 @@ class Preprocessor:
 
         return image    # (C, H, W) float32
 
+    def collapse_channels(self, image):
+        '''Collapse a (C, H, W) float32 array to (1, H, W) by averaging across channels.'''
+        if image.shape[0] == 1:
+            return image
+        return image.mean(axis=0, keepdims=True)
+
     def _make_vis(self, arr):
         '''Build an HWC uint8 RGB preview from a CHW float32 array, clipped at 99th percentile.'''
         if arr.shape[0] >= 3:
@@ -408,7 +414,12 @@ if __name__ == '__main__':
         # --- global ---
         logger.info(f"[WORKING]\tglobal image...")
         imagenet_norm = config['preprocess'].get('imagenet_norm', False)
-        image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False, imagenet_norm=imagenet_norm)
+        standardize = config['preprocess'].get('standardize', True)
+        collapse = config['preprocess'].get('collapse', False)
+        image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
+                                  standardize=standardize, imagenet_norm=imagenet_norm)
+        if collapse:
+            image = p.collapse_channels(image)
         image_vis = p.save_global(image, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tglobal image  shape={image.shape}")
 
@@ -439,7 +450,10 @@ if __name__ == '__main__':
 
         logger.info(f"[WORKING]\tlocal image tiles...")
         image_local = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
-                                        target_size=tiling_size, imagenet_norm=imagenet_norm)
+                                        target_size=tiling_size, standardize=standardize,
+                                        imagenet_norm=imagenet_norm)
+        if collapse:
+            image_local = p.collapse_channels(image_local)
         n = p.save_local(image_local, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tlocal image  {n} patches")
 

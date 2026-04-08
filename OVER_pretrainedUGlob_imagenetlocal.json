@@ -1,5 +1,5 @@
 {
-    "name": "[OVER] finetunedregssl",
+    "name": "[OVER] finetunedconservativeregssl",
     "n_gpu": 1,
 
     "arch": {
