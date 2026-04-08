@@ -180,8 +180,9 @@ class Preprocessor:
                 print(f"\topenslide failed ({type(e).__name__}), falling back to tifffile")
                 image = self._load_tif_tifffile(path)
 
-        # enforce 3-channel images (CHW at this point)
-        if not is_mask and image.shape[0] != 3:
+        # enforce 3-channel images (CHW at this point); skip if collapse will reduce to 1ch
+        collapse = self.c['preprocess'].get('collapse', False)
+        if not is_mask and not collapse and image.shape[0] != 3:
             handle = self.c['preprocess'].get('handle_missing_or_additional_channels', False)
             if not handle:
                 raise ValueError(
