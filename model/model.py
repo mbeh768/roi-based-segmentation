@@ -174,11 +174,11 @@ class _GlobalUNet(nn.Module):
     Pretrain without labels: attach Conv2d(out_ch, 3, 1), crop g_feat at tile
     position with _crop_and_resize, and reconstruct a downsampled local tile.
     """
-    def __init__(self, out_ch=64):
+    def __init__(self, in_ch=3, out_ch=64):
         super().__init__()
         self.pool = nn.MaxPool2d(2)
 
-        self.enc1 = _double_conv(3,   32)
+        self.enc1 = _double_conv(in_ch, 32)
         self.enc2 = _double_conv(32,  64)
         self.enc3 = _double_conv(64,  64)
         self.bot  = _double_conv(64,  64)           # H/8
@@ -266,17 +266,17 @@ class LocalGlobalUNet(BaseModel):
     Config:
         "arch": {"type": "LocalGlobalUNet", "args": {"num_classes": 1}}
     """
-    def __init__(self, num_classes=1, global_ch=64):
+    def __init__(self, num_classes=1, in_ch=3, global_ch=64):
         super().__init__()
 
         self.pool = nn.MaxPool2d(2)
-        self.enc1 = _double_conv(3,    64)
+        self.enc1 = _double_conv(in_ch, 64)
         self.enc2 = _double_conv(64,  128)
         self.enc3 = _double_conv(128, 256)
         self.enc4 = _double_conv(256, 512)
         self.bot  = _double_conv(512, 512)           # H/16
 
-        self.global_enc = _GlobalUNet(out_ch=global_ch)
+        self.global_enc = _GlobalUNet(in_ch=in_ch, out_ch=global_ch)
 
         self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
         self.dec4 = _double_conv(256 + 512, 256)     # up + s4 → H/8
@@ -493,17 +493,17 @@ class PretrainedLocalGlobalUNet(BaseModel):
             "ssl_checkpoint": "saved/models/SSL_.../checkpoint-epoch50.pth"
         }}
     """
-    def __init__(self, num_classes=1, global_ch=64, ssl_checkpoint=None):
+    def __init__(self, num_classes=1, in_ch=3, global_ch=64, ssl_checkpoint=None):
         super().__init__()
 
         self.pool = nn.MaxPool2d(2)
-        self.enc1 = _double_conv(3,    64)
+        self.enc1 = _double_conv(in_ch, 64)
         self.enc2 = _double_conv(64,  128)
         self.enc3 = _double_conv(128, 256)
         self.enc4 = _double_conv(256, 512)
         self.bot  = _double_conv(512, 512)           # H/16
 
-        self.global_enc = _GlobalUNet(out_ch=global_ch)
+        self.global_enc = _GlobalUNet(in_ch=in_ch, out_ch=global_ch)
 
         if ssl_checkpoint is not None:
             ckpt = torch.load(ssl_checkpoint, map_location='cpu', weights_only=False)
@@ -580,21 +580,21 @@ class SSLGlobalUNet(BaseModel):
     After pretraining, transfer self.unet weights to LocalGlobalUNet.global_enc.
 
     Config:
-        "arch": {"type": "SSLGlobalUNet", "args": {"out_ch": 64}}
+        "arch": {"type": "SSLGlobalUNet", "args": {"in_ch": 1, "out_ch": 64}}
     """
-    def __init__(self, out_ch=64):
+    def __init__(self, in_ch=3, out_ch=64):
         super().__init__()
-        self.unet = _GlobalUNet(out_ch=out_ch)
+        self.unet = _GlobalUNet(in_ch=in_ch, out_ch=out_ch)
         # throwaway decoder heads — discarded after pretraining
         self.global_head = nn.Sequential(
             _double_conv(out_ch, out_ch),
             _double_conv(out_ch, out_ch),
-            nn.Conv2d(out_ch, 3, kernel_size=1),
+            nn.Conv2d(out_ch, in_ch, kernel_size=1),
         )
         self.local_head = nn.Sequential(
             _double_conv(out_ch, out_ch),
             _double_conv(out_ch, out_ch),
-            nn.Conv2d(out_ch, 3, kernel_size=1),
+            nn.Conv2d(out_ch, in_ch, kernel_size=1),
         )
 
     def forward(self, aug_global, pos, local_target):

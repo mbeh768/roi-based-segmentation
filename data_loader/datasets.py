@@ -156,9 +156,9 @@ class SSLGlobalLocalDataset(Dataset):
 
         self.transform = T.Compose([
             T.RandomApply([T.Lambda(lambda x: x + torch.randn_like(x) * noise_std)], p=p_noise),
-            T.RandomApply([T.Lambda(lambda x: x * (1.0 + (torch.rand(3, 1, 1) * 2 - 1) * color_scale_range))], p=p_color),
+            T.RandomApply([T.Lambda(lambda x: x * (1.0 + (torch.rand(x.shape[0], 1, 1) * 2 - 1) * color_scale_range))], p=p_color),
             T.RandomApply([T.GaussianBlur(kernel_size=blur_kernel, sigma=(0.1, 2.0))], p=p_blur),
-            T.RandomApply([T.Lambda(lambda x: x.index_fill(0, torch.tensor([random.randint(0, 2)]), 0.0))], p=p_channel_drop),
+            T.RandomApply([T.Lambda(lambda x: x.index_fill(0, torch.tensor([random.randint(0, x.shape[0] - 1)]), 0.0))], p=p_channel_drop),
         ])
 
         self.items = []

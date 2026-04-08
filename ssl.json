@@ -4,7 +4,7 @@
 
     "arch": {
         "type": "SSLGlobalUNet",
-        "args": {"out_ch": 64}
+        "args": {"in_ch": 1, "out_ch": 64}
     },
     "data_loader": {
         "type": "SSLGlobalLocalDataLoader",
@@ -47,8 +47,10 @@
         "tiling_size": 2048,
         "tile_size": 256,
         "stride": 256,
-        "imagenet_norm": true,
-        "handle_missing_or_additional_channels": true
+        "handle_missing_or_additional_channels": false,
+        "standardize": true,
+        "imagenet_norm": false,
+        "collapse": true
     },
 
     "trainer": {
