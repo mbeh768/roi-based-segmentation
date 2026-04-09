@@ -15,9 +15,12 @@
             "validation_split": 0.2,
             "num_workers": 2,
             "crop_size": 32,
-            "noise_std": 0.1,
-            "color_scale_range": 0.2,
-            "blur_kernel": 5
+            "noise_std": 0.3,
+            "color_scale_range": 0.4,
+            "blur_kernel": 7,
+            "p_blur": 0.5,
+            "mask_ratio": 0.4,
+            "p_intensity_invert": 0.2
         }
     },
     "optimizer": {
@@ -43,7 +46,7 @@
     "preprocess": {
         "raw_image_directory": "/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26",
         "global_downsample": 256,
-        "czi_max_px": 5000000000,
+        "czi_max_px": 4000000000,
         "tiling_size": 2048,
         "tile_size": 256,
         "stride": 256,

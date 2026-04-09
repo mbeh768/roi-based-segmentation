@@ -149,16 +149,19 @@ class SSLGlobalLocalDataset(Dataset):
                  noise_std=0.1, color_scale_range=0.2,
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.3,
-                 p_channel_drop=0.3):
+                 mask_ratio=0.0, mask_patch_size=16,
+                 p_intensity_invert=0.0):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.crop_size = crop_size
+        self.mask_ratio = mask_ratio
+        self.mask_patch_size = mask_patch_size
 
         self.transform = T.Compose([
             T.RandomApply([T.Lambda(lambda x: x + torch.randn_like(x) * noise_std)], p=p_noise),
             T.RandomApply([T.Lambda(lambda x: x * (1.0 + (torch.rand(x.shape[0], 1, 1) * 2 - 1) * color_scale_range))], p=p_color),
             T.RandomApply([T.GaussianBlur(kernel_size=blur_kernel, sigma=(0.1, 2.0))], p=p_blur),
-            T.RandomApply([T.Lambda(lambda x: x.index_fill(0, torch.tensor([random.randint(0, x.shape[0] - 1)]), 0.0))], p=p_channel_drop),
+            T.RandomApply([T.Lambda(lambda x: -x)], p=p_intensity_invert),
         ])
 
         self.items = []
@@ -176,8 +179,14 @@ class SSLGlobalLocalDataset(Dataset):
         return len(self.items)
 
     def _augment(self, img):
-        """Apply random appearance-only augmentations to a (3, H, W) tensor."""
-        return self.transform(img.clone())
+        """Apply random augmentations to a (C, H, W) tensor."""
+        img = self.transform(img.clone())
+        if self.mask_ratio > 0:
+            img = T.RandomErasing(
+                p=1.0, scale=(self.mask_ratio * 0.5, self.mask_ratio),
+                ratio=(0.3, 3.3), value=0
+            )(img)
+        return img
 
     def __getitem__(self, idx):
         patch_path, stem, entry = self.items[idx]
