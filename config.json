@@ -3,12 +3,12 @@
     "n_gpu": 1,
 
     "arch": {
-        "type": "LocalGlobalUNet",
+        "type": "PretrainedLocalGlobalUNet",
         "args": {
             "num_classes": 1,
             "in_ch": 1, 
-            "out_ch": 64,
-            "ssl_checkpoint": "saved/models/bottleneckssl/0404_193553/checkpoint-epoch90.pth"
+            "global_ch": 64,
+            "ssl_checkpoint": "/media/max/500GBSSD/machine_learning_projects/Mayo/att_vent_seg/saved/models/bottleneckssl/0409_193107/checkpoint-epoch100.pth"
         }
     },
     "data_loader": {
@@ -17,7 +17,7 @@
             "data_dir": "data/[collapsed]64_tiles_per_image",
             "batch_size": 20,
             "shuffle": true,
-            "validation_split": 0.2,
+            "validation_split": 0.0,
             "num_workers": 2
         }
     },
@@ -53,7 +53,7 @@
     },
 
     "trainer": {
-        "epochs": 1500,
+        "epochs": 400,
 
         "save_dir": "saved/",
         "save_period": 10,

@@ -4,3 +4,12 @@ im doing ssl now just pointint to '/media/max/2TBHDD/hillestad_update_processed_
 failure
 [17P645-1], that is okay, segmentation is not classic
 [AJKY121-9-1], not really acceptable, but segmentation was usable
+
+
+you may want to just feed cardimyocyte instead of DAPI and MYL4, no relevance to ssl dataset
+
+saw significant overfit performance by collapsing to single channel
+
+you gotta implement a dictionary for all preprocess steps
+
+single channel seems to struggle drawing lines that arent based on morphology (slightly)

@@ -43,6 +43,8 @@ def tif_to_tiles(path, p, is_mask=False):
     arr = p.load_and_format(path, interp, standardize=not is_mask,
                             is_mask=is_mask, target_size=tiling_size,
                             imagenet_norm=imagenet_norm)  # (C, H, W)
+    if not is_mask and p.c['preprocess'].get('collapse', False):
+        arr = p.collapse_channels(arr)
 
     img_hwc = np.transpose(arr, (1, 2, 0))
     H, W = img_hwc.shape[:2]

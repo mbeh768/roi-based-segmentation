@@ -56,13 +56,15 @@ class SSLGlobalLocalDataLoader(BaseDataLoader):
                  crop_size=32, noise_std=0.1, color_scale_range=0.2,
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.3,
-                 p_channel_drop=0.3):
+                 mask_ratio=0.0, mask_patch_size=16,
+                 p_intensity_invert=0.0):
         self.dataset = SSLGlobalLocalDataset(
             data_dir, crop_size=crop_size,
             noise_std=noise_std, color_scale_range=color_scale_range,
             blur_kernel=blur_kernel,
             p_noise=p_noise, p_color=p_color, p_blur=p_blur,
-            p_channel_drop=p_channel_drop,
+            mask_ratio=mask_ratio, mask_patch_size=mask_patch_size,
+            p_intensity_invert=p_intensity_invert,
         )
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 

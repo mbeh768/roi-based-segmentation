@@ -39,6 +39,8 @@ def tif_to_tensor(path, config, is_mask=False):
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
     imagenet_norm = config['preprocess'].get('imagenet_norm', False) if not is_mask else False
     arr = p.load_and_format(path, interp, standardize=not is_mask, is_mask=is_mask, imagenet_norm=imagenet_norm)
+    if not is_mask and config['preprocess'].get('collapse', False):
+        arr = p.collapse_channels(arr)
     return torch.from_numpy(arr)   # (C, H, W) float32
 
 
