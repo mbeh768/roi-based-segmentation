@@ -511,16 +511,8 @@ class PretrainedLocalGlobalUNet(BaseModel):
             global_enc_sd = {k.replace('unet.', ''): v
                              for k, v in ssl_sd.items() if k.startswith('unet.')}
             self.global_enc.load_state_dict(global_enc_sd)
-            # freeze all, then unfreeze only the second conv of enc1
             for p in self.global_enc.parameters():
                 p.requires_grad = False
-            # enc1 is _double_conv (nn.Sequential):
-            #   [0] Conv2d  [1] GroupNorm  [2] ReLU  ← first conv (frozen)
-            #   [3] Conv2d  [4] GroupNorm  [5] ReLU  ← second conv (unfrozen)
-            for p in self.global_enc.enc1[3:].parameters():
-                p.requires_grad = True
-            print(f"[PretrainedLocalGlobalUNet] Loaded SSL global_enc from {ssl_checkpoint} "
-                  f"(only enc1 second conv unfrozen)")
 
         self.up4  = nn.ConvTranspose2d(512 + global_ch, 256, kernel_size=2, stride=2)
         self.dec4 = _double_conv(256 + 512, 256)     # up + s4 → H/8

@@ -1,5 +1,5 @@
 {
-    "name": "[VAL] imagenet_encoder_experiment",
+    "name": "[VAL]_static_global_experiment",
     "n_gpu": 1,
 
     "arch": {
@@ -17,7 +17,7 @@
             "data_dir": "data/[collapsed]64_tiles_per_image",
             "batch_size": 20,
             "shuffle": true,
-            "validation_split": 0.0,
+            "validation_split": 0.2,
             "num_workers": 2
         }
     },
@@ -37,7 +37,7 @@
         "type": "CosineAnnealingLR",
         "args": {
             "T_max": 500,
-            "eta_min": 5e-4
+            "eta_min": 1e-6
         }
     },
     "preprocess": {
@@ -56,11 +56,11 @@
         "epochs": 400,
 
         "save_dir": "saved/",
-        "save_period": 10,
+        "save_period": 25,
         "verbosity": 2,
 
         "monitor": "min val_loss",
-        "early_stop": 10,
+        "early_stop": 100,
 
         "tensorboard": true,
         "aux_loss_weight": 0.4
