@@ -4,6 +4,8 @@ import random
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
+from torchvision.transforms import v2
+from torchvision import tv_tensors
 from torch.utils.data import Dataset
 
 
@@ -89,10 +91,25 @@ class LocalGlobalDataset(Dataset):
 
     Returns (local, glob, pos, mask) where pos = [y0, x0, y1, x1] normalised.
     """
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, augment=True):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
+        self.augment = augment
+
+        # Geometric — applied to local, glob, mask, and global_mask together
+        self.geo_transform = v2.Compose([
+            v2.RandomHorizontalFlip(p=0.5),
+            v2.RandomVerticalFlip(p=0.5),
+            v2.RandomChoice([
+                v2.RandomRotation(degrees=(0, 0)),
+                v2.RandomRotation(degrees=(90, 90)),
+                v2.RandomRotation(degrees=(180, 180)),
+                v2.RandomRotation(degrees=(270, 270)),
+            ]),
+        ]) if augment else None
+        # Photometric — applied to local only (add blur, erasure, etc. here)
+        self.photo_transform = None
 
         self.items = []
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
@@ -129,6 +146,14 @@ class LocalGlobalDataset(Dataset):
         if not global_mask_path.exists():
             raise FileNotFoundError(f"Global mask not found: {global_mask_path}")
         global_mask = torch.load(global_mask_path, weights_only=True)
+
+        if self.geo_transform is not None:
+            local, glob, mask, global_mask = self.geo_transform(
+                tv_tensors.Image(local), tv_tensors.Image(glob),
+                tv_tensors.Mask(mask), tv_tensors.Mask(global_mask),
+            )
+        if self.photo_transform is not None:
+            local = self.photo_transform(tv_tensors.Image(local))
 
         return local, glob, pos, mask, global_mask
 
