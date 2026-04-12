@@ -502,6 +502,7 @@ class PretrainedLocalGlobalUNet(BaseModel):
         self.enc3 = _double_conv(128, 256)
         self.enc4 = _double_conv(256, 512)
         self.bot  = _double_conv(512, 512)           # H/16
+        self.bot_drop = nn.Dropout2d(0.1)
 
         self.global_enc = _GlobalUNet(in_ch=in_ch, out_ch=global_ch)
 
@@ -534,7 +535,7 @@ class PretrainedLocalGlobalUNet(BaseModel):
         s2 = self.enc2(self.pool(s1))                                # (B, 128, H/2)
         s3 = self.enc3(self.pool(s2))                                # (B, 256, H/4)
         s4 = self.enc4(self.pool(s3))                                # (B, 512, H/8)
-        x  = self.bot(self.pool(s4))                                 # (B, 512, H/16)
+        x  = self.bot_drop(self.bot(self.pool(s4)))                  # (B, 512, H/16)
 
         g_feat = self.global_enc(glob)
         g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
