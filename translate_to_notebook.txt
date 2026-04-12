@@ -1,32 +1,32 @@
-preceeding and following conv layer produced usable segmentation, now trying using a proper names csv!!!!
-im doing ssl now just pointint to '/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26' which is the entireity of images provided on march 14. This may include duplicates which will muddle results
+[2026-04-03]
+- preceding and following conv layer produced usable segmentation; now trying a proper names csv
+- started SSL pointing at '/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26', the entirety of images provided on march 14
+    - may include duplicates, which could muddle results
+- failure cases:
+    - [17P645-1] — ok, segmentation is not classic
+    - [AJKY121-9-1] — not really acceptable, but segmentation was usable
 
-failure
-[17P645-1], that is okay, segmentation is not classic
-[AJKY121-9-1], not really acceptable, but segmentation was usable
+[2026-04-10]
+- consider feeding cardiomyocyte instead of DAPI + MYL4 (no relevance to ssl dataset)
+- need to implement a dictionary for all preprocess steps
+- collapsing to single channel gave a significant overfit performance boost
+    - but single channel struggles slightly with lines that arent based on morphology
 
+[2026-04-11]
+- tried training only the first conv layer of the global encoder (to see how much single-channel collapse hurt it)
+    - result: probably usable with the tracing you wanna implement, but this is the threshold for not-usable-as-is
+    - then froze the entire global encoder — outputs were significantly better than training only the first conv
+        - likely speaks to over-overfitting, but the important takeaway is we have effectively isolated the global encoder
+        - problem is now much simpler: how do we divide local morphology. easy — we have a massive dataset
+        - still expect to do some limited annotation; global features + a per-case user annotation at inference will help
+- poor generalization in initial validation experiments
+    - implementing vertical/horizontal flip and rotation
+    - geometric transforms (rotation/flip) applied to all [local, global, global_mask, local_mask]
+    - photometric transforms applied only to local tiles — global extractor should be robust to many transforms already
+    - overfit test with augs failed; retested with no dropout or augs, 300 epochs still not great → more overfit experiments needed
 
-you may want to just feed cardimyocyte instead of DAPI and MYL4, no relevance to ssl dataset
-
-saw significant overfit performance by collapsing to single channel
-
-you gotta implement a dictionary for all preprocess steps
-
-single channel seems to struggle drawing lines that arent based on morphology (slightly)
-
-training only first convolution is probably usable combined with the tracing you wanna implement, this is the threshold for not usable as is, trying no traniable in global to see how single channel affected it
-
-Without training any of the global encoder outputs are signficantly better than training only first conovlution, this likely speaks to over-overfitting but the important takeaway is that we have effectivley isolated the global encoder!
-
-now the problem is much more simple, how do we divide local morphology, easy, we have massive dataset.
-
-i still expect to do some limited annotation. but global features and a per-case user annotation at inference will be helpful
-
-[04-12-2026]
-not great generalization with initial validation experiments, implementing vertical and horizontal flip, rotation
-
-testing overfit on augmentation pipeline just to be sure, applying geometric transforms (rotation/flip) to all [local, global, global_mask, local_mask], however im just applying photometric transform to local tiles because global extractor should be robust to many types of transform
-
-overfit failed, testing again with no dropout or augs, after 300 epochs it wasnt great, more overfit expeirments needed
-
-* adding 0.3 enforced foreground per batch
+[2026-04-12]
+- added 0.3 enforced foreground ratio per batch
+    - massive improvement to iou with guaranteed foreground — should have been doing this the whole time
+    - causes some noise (false positives), but this will be remedied with other methods
+    - goal: get to "good enough" with limited data, then use manual per-case annotation as a reference to clean

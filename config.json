@@ -1,5 +1,5 @@
 {
-    "name": "no transforms or dropout overfit",
+    "name": "no transforms or dropout overfit, added encfored foreground",
     "n_gpu": 1,
 
     "arch": {
