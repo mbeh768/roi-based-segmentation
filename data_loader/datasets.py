@@ -344,3 +344,68 @@ class SSLGlobalLocalDataset(Dataset):
         ).squeeze(0)   # (3, crop_size, crop_size)
 
         return aug_global, pos, clean_global, local_target
+
+
+class BYOLDataset(Dataset):
+    """
+    Returns two photometrically-augmented views of a global image, the local
+    tile downsampled to crop_size as the auxiliary reconstruction target, and
+    the tile's normalized position in the global.
+
+    Each __getitem__ yields (v1_global, v2_global, local_target, pos).
+    A shared geometric aug is applied to global + local + pos so the cropped
+    global feature region at pos spatially aligns with local_target.
+    """
+    def __init__(self, data_dir, crop_size=16,
+                 noise_std=0.2, color_scale_range=0.3,
+                 blur_kernel=5,
+                 p_noise=0.5, p_color=0.5, p_blur=0.5,
+                 p_intensity_invert=0.2,
+                 hflip=0.0, vflip=0.0, rot90=0.0):
+        data_dir = Path(data_dir)
+        self.image_dir = data_dir / 'images'
+        self.crop_size = crop_size
+        self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
+        self.augment = any(v > 0 for v in self.aug_flags.values())
+
+        self.photo_transform = T.Compose([
+            T.RandomApply([T.Lambda(lambda x: x + torch.randn_like(x) * noise_std)], p=p_noise),
+            T.RandomApply([T.Lambda(lambda x: x * (1.0 + (torch.rand(x.shape[0], 1, 1) * 2 - 1) * color_scale_range))], p=p_color),
+            T.RandomApply([T.GaussianBlur(kernel_size=blur_kernel, sigma=(0.1, 2.0))], p=p_blur),
+            T.RandomApply([T.Lambda(lambda x: -x)], p=p_intensity_invert),
+        ])
+
+        self.items = []
+        for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
+            stem = coords_file.parent.name
+            with open(coords_file) as f:
+                entries = json.load(f)
+            for entry in entries:
+                patch_path = coords_file.parent / entry['filename']
+                self.items.append((patch_path, stem, entry))
+        assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, idx):
+        patch_path, stem, entry = self.items[idx]
+        glob = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
+        local = torch.load(patch_path, weights_only=True)
+
+        H, W = entry['image_H'], entry['image_W']
+        y, x = entry['y'], entry['x']
+        h, w = entry['height'], entry['width']
+        pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
+
+        if self.augment:
+            glob, local, pos = _geo_augment(glob, local, pos=pos, flags=self.aug_flags)
+
+        v1 = self.photo_transform(glob.clone())
+        v2 = self.photo_transform(glob.clone())
+        local_target = F.interpolate(
+            local.unsqueeze(0),
+            size=(self.crop_size, self.crop_size),
+            mode='bilinear', align_corners=True,
+        ).squeeze(0)
+        return v1, v2, local_target, pos

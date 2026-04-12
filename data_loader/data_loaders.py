@@ -2,7 +2,7 @@ import numpy as np
 from collections import defaultdict
 from torch.utils.data.sampler import Sampler, SubsetRandomSampler
 from base import BaseDataLoader
-from data_loader.datasets import GlobalDataset, LocalDataset, LocalGlobalDataset, SSLGlobalLocalDataset
+from data_loader.datasets import GlobalDataset, LocalDataset, LocalGlobalDataset, SSLGlobalLocalDataset, BYOLDataset
 
 
 class ForegroundBalancedSampler(Sampler):
@@ -148,6 +148,49 @@ class SSLGlobalLocalDataLoader(BaseDataLoader):
 
         n_val = split if isinstance(split, int) else max(1, int(len(stems) * split))
 
+        val_stems   = stems[:n_val]
+        train_stems = stems[n_val:]
+
+        train_idx = [i for s in train_stems for i in stem_to_indices[s]]
+        val_idx   = [i for s in val_stems   for i in stem_to_indices[s]]
+
+        self.shuffle = False
+        self.n_samples = len(train_idx)
+
+        return SubsetRandomSampler(train_idx), SubsetRandomSampler(val_idx)
+
+
+class BYOLDataLoader(BaseDataLoader):
+    def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1,
+                 crop_size=16,
+                 noise_std=0.2, color_scale_range=0.3,
+                 blur_kernel=5,
+                 p_noise=0.5, p_color=0.5, p_blur=0.5,
+                 p_intensity_invert=0.2,
+                 hflip=0.0, vflip=0.0, rot90=0.0):
+        self.dataset = BYOLDataset(
+            data_dir, crop_size=crop_size,
+            noise_std=noise_std, color_scale_range=color_scale_range,
+            blur_kernel=blur_kernel,
+            p_noise=p_noise, p_color=p_color, p_blur=p_blur,
+            p_intensity_invert=p_intensity_invert,
+            hflip=hflip, vflip=vflip, rot90=rot90,
+        )
+        super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
+
+    def _split_sampler(self, split):
+        if split == 0.0:
+            return None, None
+
+        stem_to_indices = defaultdict(list)
+        for idx, (_, stem, _) in enumerate(self.dataset.items):
+            stem_to_indices[stem].append(idx)
+
+        stems = list(stem_to_indices.keys())
+        np.random.seed(0)
+        np.random.shuffle(stems)
+
+        n_val = split if isinstance(split, int) else max(1, int(len(stems) * split))
         val_stems   = stems[:n_val]
         train_stems = stems[n_val:]
 

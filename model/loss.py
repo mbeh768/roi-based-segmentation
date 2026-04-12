@@ -64,3 +64,18 @@ def vicreg_features(feat, var_weight=1.0, cov_weight=0.04):
 def l1(output, target):
     return F.l1_loss(output, target)
 
+
+def dense_byol(z1, z2, t1, t2):
+    """
+    Symmetric per-pixel BYOL loss.
+
+    Inputs are (B, C, H, W); we L2-normalize along channels at each spatial
+    location, then compute 2 - 2 * cos(online_i, sg(target_j)) averaged over
+    all pixels and the batch, symmetrized across the two view assignments.
+    """
+    def _one(a, b):
+        a = F.normalize(a, dim=1)
+        b = F.normalize(b.detach(), dim=1)
+        return (2 - 2 * (a * b).sum(dim=1)).mean()
+    return 0.5 * (_one(z1, t2) + _one(z2, t1))
+

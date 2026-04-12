@@ -197,3 +197,92 @@ class SSLGlobalUNet(BaseModel):
         local_feat = _crop_and_resize(feat, pos, cs, cs)               # (B, out_ch, cs, cs)
         local_recon  = self.local_head(local_feat)                      # (B, 3, cs, cs)
         return global_recon, local_recon, feat
+
+
+def _dense_mlp(in_ch, hidden_ch, out_ch):
+    return nn.Sequential(
+        nn.Conv2d(in_ch, hidden_ch, kernel_size=1, bias=False),
+        nn.GroupNorm(8, hidden_ch),
+        nn.ReLU(inplace=True),
+        nn.Conv2d(hidden_ch, out_ch, kernel_size=1),
+    )
+
+
+class BYOLDenseUNet(BaseModel):
+    """
+    Dense BYOL wrapper around _GlobalUNet for pretraining.
+
+    Two augmented views of the global image drive the main representation loss:
+    online (unet + projector + predictor) vs EMA target (unet + projector,
+    stop-grad), with per-pixel normalized-MSE symmetrized across views.
+
+    An auxiliary crop-to-local decoder keeps the cropped global features
+    semantically grounded: features cropped from feat1 at pos are decoded by a
+    throwaway local_head to predict the downsampled local tile (pixel MSE).
+    Only unet, projector, predictor and local_head receive gradients; the local
+    tile is never pushed through the unet.
+
+    After pretraining, transfer self.unet weights to LocalGlobalUNet.global_enc
+    (same convention as SSLGlobalUNet — keys start with "unet.").
+
+    Config:
+        "arch": {"type": "BYOLDenseUNet", "args": {
+            "in_ch": 1, "out_ch": 64,
+            "proj_hidden": 128, "proj_dim": 128,
+            "momentum": 0.996,
+            "crop_size": 16
+        }}
+    """
+    def __init__(self, in_ch=1, out_ch=64, proj_hidden=128, proj_dim=128,
+                 momentum=0.996, crop_size=16):
+        super().__init__()
+        self.momentum = momentum
+        self.crop_size = crop_size
+
+        self.unet = _GlobalUNet(in_ch=in_ch, out_ch=out_ch)
+        self.projector = _dense_mlp(out_ch, proj_hidden, proj_dim)
+        self.predictor = _dense_mlp(proj_dim, proj_hidden, proj_dim)
+
+        self.local_head = nn.Sequential(
+            _double_conv(out_ch, out_ch),
+            _double_conv(out_ch, out_ch),
+            nn.Conv2d(out_ch, in_ch, kernel_size=1),
+        )
+
+        self.target_unet = _GlobalUNet(in_ch=in_ch, out_ch=out_ch)
+        self.target_projector = _dense_mlp(out_ch, proj_hidden, proj_dim)
+        self._copy_to_target()
+        for p in self.target_unet.parameters():
+            p.requires_grad = False
+        for p in self.target_projector.parameters():
+            p.requires_grad = False
+
+    @torch.no_grad()
+    def _copy_to_target(self):
+        for p_o, p_t in zip(self.unet.parameters(), self.target_unet.parameters()):
+            p_t.data.copy_(p_o.data)
+        for p_o, p_t in zip(self.projector.parameters(), self.target_projector.parameters()):
+            p_t.data.copy_(p_o.data)
+
+    @torch.no_grad()
+    def ema_update(self, tau=None):
+        m = self.momentum if tau is None else tau
+        for p_o, p_t in zip(self.unet.parameters(), self.target_unet.parameters()):
+            p_t.data.mul_(m).add_(p_o.data, alpha=1 - m)
+        for p_o, p_t in zip(self.projector.parameters(), self.target_projector.parameters()):
+            p_t.data.mul_(m).add_(p_o.data, alpha=1 - m)
+
+    def forward(self, v1, v2, pos):
+        feat1 = self.unet(v1)
+        feat2 = self.unet(v2)
+        z1 = self.predictor(self.projector(feat1))
+        z2 = self.predictor(self.projector(feat2))
+
+        cs = self.crop_size
+        local_feat = _crop_and_resize(feat1, pos, cs, cs)
+        local_recon = self.local_head(local_feat)
+
+        with torch.no_grad():
+            t1 = self.target_projector(self.target_unet(v1))
+            t2 = self.target_projector(self.target_unet(v2))
+        return z1, z2, t1, t2, local_recon, feat1

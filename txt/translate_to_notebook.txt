@@ -40,3 +40,25 @@
     - 400 epochs is too much, lets try a retrain
     - KEY TAKEAWAY: model struggles to overfit without intense memorization, which suggests that global features are lacking
     - this also suggests ventricles have inherent directionality that is detectable by the network, so that speaks to the physiological probability of these augmentations being reflected in real datasets
+-abandoning existing ssl and doing BYOL to avoid collapse, prediction grid just showed blurry outputs
+    - starting with only global image BYOL
+    from claude:
+    - extended with a crop-to-local auxiliary term: online crops feat1 at pos
+      via _crop_and_resize to (crop_size, crop_size) and a throwaway local_head
+      decodes that crop to pixel-space prediction of the downsampled local tile
+      (pixel MSE). local tile is NEVER fed through the unet — only the cropped
+      global features are trained against it. this keeps the encoder's input
+      distribution matched to downstream (globals only).
+    - crop_size semantics: it is the spatial size of
+        (a) the crop taken from the global feature map at pos, and
+        (b) the downsampled local tile that serves as the MSE target.
+      downstream in PretrainedLocalGlobalUNet the cropped global features are
+      resized to the local encoder's bottleneck spatial dim (local_tile / 16,
+      i.e. 16 for 256px tiles) and concatenated before the decoder. setting
+      crop_size = 16 makes the SSL pretext operate at the exact spatial
+      granularity features will be consumed at downstream — features at each
+      position in the 16x16 crop learn to encode the semantic content of that
+      1/16 x 1/16 region of the tile, which is what the bottleneck decoder
+      will read. mismatching crop_size against the bottleneck doesn't break
+      anything (resize handles it) but wastes capacity training features at a
+      resolution they're never used at.
