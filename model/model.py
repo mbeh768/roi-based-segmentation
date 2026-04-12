@@ -93,7 +93,8 @@ class PretrainedLocalGlobalUNet(BaseModel):
             "ssl_checkpoint": "saved/models/SSL_.../checkpoint-epoch50.pth"
         }}
     """
-    def __init__(self, num_classes=1, in_ch=3, global_ch=64, ssl_checkpoint=None):
+    def __init__(self, num_classes=1, in_ch=3, global_ch=64, ssl_checkpoint=None,
+                 bottleneck_dropout=0.1):
         super().__init__()
 
         self.pool = nn.MaxPool2d(2)
@@ -102,7 +103,7 @@ class PretrainedLocalGlobalUNet(BaseModel):
         self.enc3 = _double_conv(128, 256)
         self.enc4 = _double_conv(256, 512)
         self.bot  = _double_conv(512, 512)           # H/16
-        self.bot_drop = nn.Dropout2d(0.1)
+        self.bot_drop = nn.Dropout2d(bottleneck_dropout)
 
         self.global_enc = _GlobalUNet(in_ch=in_ch, out_ch=global_ch)
 
