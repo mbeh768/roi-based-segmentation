@@ -24,11 +24,11 @@ def _geo_augment(*tensors, pos):
         tensors = tuple(torch.flip(t, [-2]) for t in tensors)
         y0, y1 = 1 - y1, 1 - y0
 
-    k = random.randint(0, 3)  # 90° rotation steps (CW)
+    k = random.randint(0, 3)  # 90° CCW rotation steps (matches torch.rot90)
     if k > 0:
         tensors = tuple(torch.rot90(t, k, [-2, -1]) for t in tensors)
         for _ in range(k):
-            y0, x0, y1, x1 = x0, 1 - y1, x1, 1 - y0
+            y0, x0, y1, x1 = 1 - x1, y0, 1 - x0, y1
 
     pos = torch.tensor([y0, x0, y1, x1], dtype=pos.dtype)
     return (*tensors, pos)
