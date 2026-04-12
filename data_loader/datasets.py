@@ -12,27 +12,28 @@ from torch.utils.data import Dataset
 def _geo_augment(*tensors, pos, flags):
     """Apply enabled geometric augmentations to tensors and pos together.
 
-    flags: dict with keys {'hflip', 'vflip', 'rot90'} -> bool
+    flags: dict with keys {'hflip', 'vflip', 'rot90'} -> float in [0, 1]
+           (probability of applying each op; rot90 picks k in {1,2,3} uniformly
+           when triggered)
     tensors: (C, H, W) tensors to transform identically
     pos:     [y0, x0, y1, x1] normalised to [0, 1]
     Returns: (*transformed_tensors, transformed_pos)
     """
     y0, x0, y1, x1 = pos[0], pos[1], pos[2], pos[3]
 
-    if flags.get('hflip', False) and random.random() > 0.5:
+    if random.random() < flags.get('hflip', 0.0):
         tensors = tuple(torch.flip(t, [-1]) for t in tensors)
         x0, x1 = 1 - x1, 1 - x0
 
-    if flags.get('vflip', False) and random.random() > 0.5:
+    if random.random() < flags.get('vflip', 0.0):
         tensors = tuple(torch.flip(t, [-2]) for t in tensors)
         y0, y1 = 1 - y1, 1 - y0
 
-    if flags.get('rot90', False):
-        k = random.randint(0, 3)  # 90° CCW rotation steps (matches torch.rot90)
-        if k > 0:
-            tensors = tuple(torch.rot90(t, k, [-2, -1]) for t in tensors)
-            for _ in range(k):
-                y0, x0, y1, x1 = 1 - x1, y0, 1 - x0, y1
+    if random.random() < flags.get('rot90', 0.0):
+        k = random.randint(1, 3)  # 90° CCW rotation steps (matches torch.rot90)
+        tensors = tuple(torch.rot90(t, k, [-2, -1]) for t in tensors)
+        for _ in range(k):
+            y0, x0, y1, x1 = 1 - x1, y0, 1 - x0, y1
 
     pos = torch.tensor([y0, x0, y1, x1], dtype=pos.dtype)
     return (*tensors, pos)
@@ -120,14 +121,12 @@ class LocalGlobalDataset(Dataset):
 
     Returns (local, glob, pos, mask) where pos = [y0, x0, y1, x1] normalised.
     """
-    def __init__(self, data_dir, aug_flags=None):
+    def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
-        # aug_flags: dict like {'hflip': True, 'vflip': True, 'rot90': False}
-        # None or {} disables all geometric augs.
-        self.aug_flags = aug_flags or {}
-        self.augment = any(self.aug_flags.values())
+        self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
+        self.augment = any(v > 0 for v in self.aug_flags.values())
 
         # Photometric — applied to local only (add blur, erasure, etc. here)
         self.photo_transform = None
@@ -279,12 +278,15 @@ class SSLGlobalLocalDataset(Dataset):
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.3,
                  mask_ratio=0.0, mask_patch_size=16,
-                 p_intensity_invert=0.0):
+                 p_intensity_invert=0.0,
+                 hflip=0.0, vflip=0.0, rot90=0.0):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.crop_size = crop_size
         self.mask_ratio = mask_ratio
         self.mask_patch_size = mask_patch_size
+        self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
+        self.augment = any(v > 0 for v in self.aug_flags.values())
 
         self.transform = T.Compose([
             T.RandomApply([T.Lambda(lambda x: x + torch.randn_like(x) * noise_std)], p=p_noise),
@@ -321,14 +323,20 @@ class SSLGlobalLocalDataset(Dataset):
         patch_path, stem, entry = self.items[idx]
 
         clean_global = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
-        aug_global = self._augment(clean_global)
+        local_tile = torch.load(patch_path, weights_only=True)   # (3, 256, 256)
 
         H, W = entry['image_H'], entry['image_W']
         y, x = entry['y'], entry['x']
         h, w = entry['height'], entry['width']
         pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
 
-        local_tile = torch.load(patch_path, weights_only=True)   # (3, 256, 256)
+        if self.augment:
+            clean_global, local_tile, pos = _geo_augment(
+                clean_global, local_tile, pos=pos, flags=self.aug_flags,
+            )
+
+        aug_global = self._augment(clean_global)
+
         local_target = F.interpolate(
             local_tile.unsqueeze(0),
             size=(self.crop_size, self.crop_size),

@@ -63,20 +63,10 @@ class LocalDataLoader(BaseDataLoader):
 
 class LocalGlobalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0,
-                 num_workers=1, visualize=None, transforms=None,
+                 num_workers=1, visualize=None,
+                 hflip=0.0, vflip=0.0, rot90=0.0,
                  fg_ratio=0.0, fg_min=0.05):
-        # transforms accepts:
-        #   None / False / {}     -> no geometric augmentation
-        #   True                  -> enable all (hflip, vflip, rot90) [legacy]
-        #   dict                  -> per-op flags, e.g. {"hflip": true, "vflip": true, "rot90": false}
-        if transforms is True:
-            aug_flags = {'hflip': True, 'vflip': True, 'rot90': True}
-        elif isinstance(transforms, dict):
-            aug_flags = transforms
-        else:
-            aug_flags = {}
-
-        self.dataset = LocalGlobalDataset(data_dir, aug_flags=aug_flags)
+        self.dataset = LocalGlobalDataset(data_dir, hflip=hflip, vflip=vflip, rot90=rot90)
         if visualize:
             self.dataset.save_visualizations(visualize)
         self._batch_size = batch_size
@@ -131,7 +121,8 @@ class SSLGlobalLocalDataLoader(BaseDataLoader):
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.3,
                  mask_ratio=0.0, mask_patch_size=16,
-                 p_intensity_invert=0.0):
+                 p_intensity_invert=0.0,
+                 hflip=0.0, vflip=0.0, rot90=0.0):
         self.dataset = SSLGlobalLocalDataset(
             data_dir, crop_size=crop_size,
             noise_std=noise_std, color_scale_range=color_scale_range,
@@ -139,6 +130,7 @@ class SSLGlobalLocalDataLoader(BaseDataLoader):
             p_noise=p_noise, p_color=p_color, p_blur=p_blur,
             mask_ratio=mask_ratio, mask_patch_size=mask_patch_size,
             p_intensity_invert=p_intensity_invert,
+            hflip=hflip, vflip=vflip, rot90=rot90,
         )
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
