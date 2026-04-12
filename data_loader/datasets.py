@@ -4,9 +4,34 @@ import random
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
-from torchvision.transforms import v2
-from torchvision import tv_tensors
 from torch.utils.data import Dataset
+
+
+def _geo_augment(*tensors, pos):
+    """Apply random hflip, vflip, and 90° rotation to tensors and pos together.
+
+    tensors: (C, H, W) tensors to transform identically
+    pos:     [y0, x0, y1, x1] normalised to [0, 1]
+    Returns: (*transformed_tensors, transformed_pos)
+    """
+    y0, x0, y1, x1 = pos[0], pos[1], pos[2], pos[3]
+
+    if random.random() > 0.5:  # horizontal flip
+        tensors = tuple(torch.flip(t, [-1]) for t in tensors)
+        x0, x1 = 1 - x1, 1 - x0
+
+    if random.random() > 0.5:  # vertical flip
+        tensors = tuple(torch.flip(t, [-2]) for t in tensors)
+        y0, y1 = 1 - y1, 1 - y0
+
+    k = random.randint(0, 3)  # 90° rotation steps (CW)
+    if k > 0:
+        tensors = tuple(torch.rot90(t, k, [-2, -1]) for t in tensors)
+        for _ in range(k):
+            y0, x0, y1, x1 = x0, 1 - y1, x1, 1 - y0
+
+    pos = torch.tensor([y0, x0, y1, x1], dtype=pos.dtype)
+    return (*tensors, pos)
 
 
 class GlobalDataset(Dataset):
@@ -97,17 +122,6 @@ class LocalGlobalDataset(Dataset):
         self.mask_dir  = data_dir / 'masks'
         self.augment = augment
 
-        # Geometric — applied to local, glob, mask, and global_mask together
-        self.geo_transform = v2.Compose([
-            v2.RandomHorizontalFlip(p=0.5),
-            v2.RandomVerticalFlip(p=0.5),
-            v2.RandomChoice([
-                v2.RandomRotation(degrees=(0, 0)),
-                v2.RandomRotation(degrees=(90, 90)),
-                v2.RandomRotation(degrees=(180, 180)),
-                v2.RandomRotation(degrees=(270, 270)),
-            ]),
-        ]) if augment else None
         # Photometric — applied to local only (add blur, erasure, etc. here)
         self.photo_transform = None
 
@@ -147,13 +161,12 @@ class LocalGlobalDataset(Dataset):
             raise FileNotFoundError(f"Global mask not found: {global_mask_path}")
         global_mask = torch.load(global_mask_path, weights_only=True)
 
-        if self.geo_transform is not None:
-            local, glob, mask, global_mask = self.geo_transform(
-                tv_tensors.Image(local), tv_tensors.Image(glob),
-                tv_tensors.Mask(mask), tv_tensors.Mask(global_mask),
+        if self.augment:
+            local, glob, mask, global_mask, pos = _geo_augment(
+                local, glob, mask, global_mask, pos=pos,
             )
         if self.photo_transform is not None:
-            local = self.photo_transform(tv_tensors.Image(local))
+            local = self.photo_transform(local)
 
         return local, glob, pos, mask, global_mask
 

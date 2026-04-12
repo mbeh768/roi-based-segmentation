@@ -1,5 +1,5 @@
 {
-    "name": "[VAL]_static_global_experiment",
+    "name": "[OVER]seeing if we can overfit with transforms and static encoder",
     "n_gpu": 1,
 
     "arch": {
@@ -17,7 +17,7 @@
             "data_dir": "data/[collapsed]64_tiles_per_image",
             "batch_size": 20,
             "shuffle": true,
-            "validation_split": 0.2,
+            "validation_split": 0.0,
             "num_workers": 2
         }
     },
@@ -34,10 +34,10 @@
         "iou", "accuracy"
     ],
     "lr_scheduler": {
-        "type": "CosineAnnealingLR",
+        "type": "StepLR",
         "args": {
-            "T_max": 500,
-            "eta_min": 1e-6
+            "step_size": 9999,
+            "gamma": 1.0
         }
     },
     "preprocess": {
