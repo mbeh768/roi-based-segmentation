@@ -27,6 +27,6 @@
 
 [2026-04-12]
 - added 0.3 enforced foreground ratio per batch
-    - massive improvement to iou with guaranteed foreground — should have been doing this the whole time
+    - **massive** improvement to iou with guaranteed foreground — should have been doing this the whole time
     - causes some noise (false positives), but this will be remedied with other methods
     - goal: get to "good enough" with limited data, then use manual per-case annotation as a reference to clean
