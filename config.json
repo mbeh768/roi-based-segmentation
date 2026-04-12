@@ -1,5 +1,5 @@
 {
-    "name": "[OVER]seeing if we can overfit with transforms and static encoder",
+    "name": "no transforms overfit",
     "n_gpu": 1,
 
     "arch": {
@@ -18,7 +18,9 @@
             "batch_size": 20,
             "shuffle": true,
             "validation_split": 0.0,
-            "num_workers": 2
+            "num_workers": 0,
+            "transforms": false,
+            "visualize": null
         }
     },
     "optimizer": {

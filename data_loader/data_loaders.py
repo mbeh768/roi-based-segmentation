@@ -18,8 +18,11 @@ class LocalDataLoader(BaseDataLoader):
 
 
 class LocalGlobalDataLoader(BaseDataLoader):
-    def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1):
-        self.dataset = LocalGlobalDataset(data_dir)
+    def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0,
+                 num_workers=1, visualize=None, transforms=True):
+        self.dataset = LocalGlobalDataset(data_dir, augment=transforms)
+        if visualize:
+            self.dataset.save_visualizations(visualize)
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
     def _split_sampler(self, split):

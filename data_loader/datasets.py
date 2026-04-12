@@ -1,6 +1,8 @@
 from pathlib import Path
 import json
 import random
+import numpy as np
+import cv2
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
@@ -169,6 +171,72 @@ class LocalGlobalDataset(Dataset):
             local = self.photo_transform(local)
 
         return local, glob, pos, mask, global_mask
+
+    def save_visualizations(self, out_dir, n_samples=20):
+        """Save before/after augmentation side-by-side previews with pos marked."""
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        prev_augment = self.augment
+        self.augment = False
+
+        def _tensor_to_bgr(t):
+            t = t.detach().cpu().float()
+            lo, hi = t.min(), t.max()
+            t = (t - lo) / (hi - lo + 1e-8)
+            arr = (t.numpy() * 255).astype(np.uint8)
+            if arr.ndim == 3:
+                if arr.shape[0] == 1:
+                    arr = np.repeat(arr, 3, axis=0)
+                arr = arr.transpose(1, 2, 0)  # CHW -> HWC
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+            return arr
+
+        def _draw_pos(img, pos):
+            H, W = img.shape[:2]
+            y0, x0, y1, x1 = pos.tolist()
+            p1 = (int(x0 * W), int(y0 * H))
+            p2 = (int(x1 * W), int(y1 * H))
+            return cv2.rectangle(img.copy(), p1, p2, (0, 255, 0), 2)
+
+        n = min(n_samples, len(self.items))
+        idxs = random.sample(range(len(self.items)), n)
+        for i in idxs:
+            # before
+            local_b, glob_b, pos_b, mask_b, gmask_b = self[i]
+            # after
+            self.augment = True
+            local_a, glob_a, pos_a, mask_a, gmask_a = self[i]
+            self.augment = False
+
+            border_px = 4
+            border_color = (0, 255, 0)
+            rows = []
+            for local, glob, pos, mask, gmask, label in [
+                (local_b, glob_b, pos_b, mask_b, gmask_b, 'before'),
+                (local_a, glob_a, pos_a, mask_a, gmask_a, 'after'),
+            ]:
+                g = _draw_pos(_tensor_to_bgr(glob),  pos)
+                gm = _draw_pos(_tensor_to_bgr(gmask), pos)
+                l = _tensor_to_bgr(local)
+                m = _tensor_to_bgr(mask)
+                # resize local/mask to match global height
+                gh = g.shape[0]
+                l = cv2.resize(l, (gh, gh))
+                m = cv2.resize(m, (gh, gh))
+                panels = [
+                    cv2.copyMakeBorder(p, border_px, border_px, border_px, border_px,
+                                       cv2.BORDER_CONSTANT, value=border_color)
+                    for p in (g, gm, l, m)
+                ]
+                row = np.concatenate(panels, axis=1)
+                cv2.putText(row, label, (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+                rows.append(row)
+            out = np.concatenate(rows, axis=0)
+            cv2.imwrite(str(out_dir / f'sample_{i:04d}.png'), out)
+
+        self.augment = prev_augment
+        print(f"[LocalGlobalDataset] Saved {n} visualization(s) to {out_dir}")
 
 
 class SSLGlobalLocalDataset(Dataset):
