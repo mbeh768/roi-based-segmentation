@@ -33,3 +33,5 @@
 - added 0.1 dropout chance at bottleneck
     - didnt cause issues maybe slight improvement that i could not prove is statistically significant
 - added back geometric augmentations (using the 0.3 foreground and 0.1 dropout)
+    - geometric augmentations caused noisy training and failed to overfit, this points to an error in implementation, a very very good iou/time curve is observed with no augmentations and is essentially an ideal outpu
+- disabling 90 degree rotation augmentations because these were not done in ssl.

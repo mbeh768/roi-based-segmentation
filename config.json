@@ -20,8 +20,12 @@
             "shuffle": true,
             "validation_split": 0.0,
             "num_workers": 0,
-            "transforms": false,
-            "visualize": null,
+            "transforms": {
+                "hflip": true,
+                "vflip": true,
+                "rot90": false
+            },
+            "visualize": "data/previews",
             "fg_ratio": 0.3,
             "fg_min": 0.05
         }

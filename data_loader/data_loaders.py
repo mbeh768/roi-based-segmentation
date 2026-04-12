@@ -63,9 +63,20 @@ class LocalDataLoader(BaseDataLoader):
 
 class LocalGlobalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0,
-                 num_workers=1, visualize=None, transforms=True,
+                 num_workers=1, visualize=None, transforms=None,
                  fg_ratio=0.0, fg_min=0.05):
-        self.dataset = LocalGlobalDataset(data_dir, augment=transforms)
+        # transforms accepts:
+        #   None / False / {}     -> no geometric augmentation
+        #   True                  -> enable all (hflip, vflip, rot90) [legacy]
+        #   dict                  -> per-op flags, e.g. {"hflip": true, "vflip": true, "rot90": false}
+        if transforms is True:
+            aug_flags = {'hflip': True, 'vflip': True, 'rot90': True}
+        elif isinstance(transforms, dict):
+            aug_flags = transforms
+        else:
+            aug_flags = {}
+
+        self.dataset = LocalGlobalDataset(data_dir, aug_flags=aug_flags)
         if visualize:
             self.dataset.save_visualizations(visualize)
         self._batch_size = batch_size

@@ -9,28 +9,30 @@ import torchvision.transforms as T
 from torch.utils.data import Dataset
 
 
-def _geo_augment(*tensors, pos):
-    """Apply random hflip, vflip, and 90° rotation to tensors and pos together.
+def _geo_augment(*tensors, pos, flags):
+    """Apply enabled geometric augmentations to tensors and pos together.
 
+    flags: dict with keys {'hflip', 'vflip', 'rot90'} -> bool
     tensors: (C, H, W) tensors to transform identically
     pos:     [y0, x0, y1, x1] normalised to [0, 1]
     Returns: (*transformed_tensors, transformed_pos)
     """
     y0, x0, y1, x1 = pos[0], pos[1], pos[2], pos[3]
 
-    if random.random() > 0.5:  # horizontal flip
+    if flags.get('hflip', False) and random.random() > 0.5:
         tensors = tuple(torch.flip(t, [-1]) for t in tensors)
         x0, x1 = 1 - x1, 1 - x0
 
-    if random.random() > 0.5:  # vertical flip
+    if flags.get('vflip', False) and random.random() > 0.5:
         tensors = tuple(torch.flip(t, [-2]) for t in tensors)
         y0, y1 = 1 - y1, 1 - y0
 
-    k = random.randint(0, 3)  # 90° CCW rotation steps (matches torch.rot90)
-    if k > 0:
-        tensors = tuple(torch.rot90(t, k, [-2, -1]) for t in tensors)
-        for _ in range(k):
-            y0, x0, y1, x1 = 1 - x1, y0, 1 - x0, y1
+    if flags.get('rot90', False):
+        k = random.randint(0, 3)  # 90° CCW rotation steps (matches torch.rot90)
+        if k > 0:
+            tensors = tuple(torch.rot90(t, k, [-2, -1]) for t in tensors)
+            for _ in range(k):
+                y0, x0, y1, x1 = 1 - x1, y0, 1 - x0, y1
 
     pos = torch.tensor([y0, x0, y1, x1], dtype=pos.dtype)
     return (*tensors, pos)
@@ -118,11 +120,14 @@ class LocalGlobalDataset(Dataset):
 
     Returns (local, glob, pos, mask) where pos = [y0, x0, y1, x1] normalised.
     """
-    def __init__(self, data_dir, augment=True):
+    def __init__(self, data_dir, aug_flags=None):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
-        self.augment = augment
+        # aug_flags: dict like {'hflip': True, 'vflip': True, 'rot90': False}
+        # None or {} disables all geometric augs.
+        self.aug_flags = aug_flags or {}
+        self.augment = any(self.aug_flags.values())
 
         # Photometric — applied to local only (add blur, erasure, etc. here)
         self.photo_transform = None
@@ -165,7 +170,7 @@ class LocalGlobalDataset(Dataset):
 
         if self.augment:
             local, glob, mask, global_mask, pos = _geo_augment(
-                local, glob, mask, global_mask, pos=pos,
+                local, glob, mask, global_mask, pos=pos, flags=self.aug_flags,
             )
         if self.photo_transform is not None:
             local = self.photo_transform(local)
