@@ -22,6 +22,11 @@ now the problem is much more simple, how do we divide local morphology, easy, we
 
 i still expect to do some limited annotation. but global features and a per-case user annotation at inference will be helpful
 
+[04-12-2026]
 not great generalization with initial validation experiments, implementing vertical and horizontal flip, rotation
 
 testing overfit on augmentation pipeline just to be sure, applying geometric transforms (rotation/flip) to all [local, global, global_mask, local_mask], however im just applying photometric transform to local tiles because global extractor should be robust to many types of transform
+
+overfit failed, testing again with no dropout or augs, after 300 epochs it wasnt great, more overfit expeirments needed
+
+* adding 0.3 enforced foreground per batch

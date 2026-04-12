@@ -172,6 +172,24 @@ class LocalGlobalDataset(Dataset):
 
         return local, glob, pos, mask, global_mask
 
+    def foreground_indices(self, min_ratio=0.05):
+        """Partition tile indices into (fg, bg) by mask foreground fraction."""
+        fg, bg = [], []
+        print(f"[LocalGlobalDataset] Scanning {len(self.items)} tiles "
+              f"for foreground ratio >= {min_ratio}...")
+        for i, (patch_path, stem, _) in enumerate(self.items):
+            mask_path = self.mask_dir / stem / patch_path.name
+            if not mask_path.exists():
+                bg.append(i)
+                continue
+            mask = torch.load(mask_path, weights_only=True)
+            frac = (mask > 0.5).float().mean().item()
+            (fg if frac >= min_ratio else bg).append(i)
+        total = len(self.items)
+        print(f"[LocalGlobalDataset] Foreground tiles: "
+              f"{len(fg)}/{total} ({100*len(fg)/total:.1f}%)")
+        return fg, bg
+
     def save_visualizations(self, out_dir, n_samples=20):
         """Save before/after augmentation side-by-side previews with pos marked."""
         out_dir = Path(out_dir)

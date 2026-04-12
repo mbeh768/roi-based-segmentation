@@ -21,7 +21,9 @@
             "validation_split": 0.0,
             "num_workers": 0,
             "transforms": false,
-            "visualize": null
+            "visualize": null,
+            "fg_ratio": 0.3,
+            "fg_min": 0.05
         }
     },
     "optimizer": {
