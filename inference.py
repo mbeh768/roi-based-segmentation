@@ -19,12 +19,80 @@ import json
 import random
 from pathlib import Path
 
+import cv2
+import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
+import model.model as module_arch
 from preprocess import Preprocessor
-from inference_global import load_model, tif_to_tensor, to_display
-from local_inference import tif_to_tiles, stitch
+
+
+def load_model(checkpoint_path):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    config = ckpt['config']
+    model = config.init_obj('arch', module_arch)
+    model.load_state_dict(ckpt['state_dict'])
+    model.to(device).eval()
+    print(f"Loaded {ckpt['arch']} from epoch {ckpt['epoch']}")
+    return model, device, config
+
+
+def tif_to_tensor(path, config, is_mask=False):
+    """Load a TIFF and return a (C, H, W) float32 tensor via the preprocess pipeline."""
+    p = Preprocessor(config)
+    interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
+    imagenet_norm = config['preprocess'].get('imagenet_norm', False) if not is_mask else False
+    arr = p.load_and_format(path, interp, standardize=not is_mask,
+                            is_mask=is_mask, imagenet_norm=imagenet_norm)
+    if not is_mask and config['preprocess'].get('collapse', False):
+        arr = p.collapse_channels(arr)
+    return torch.from_numpy(arr)
+
+
+def to_display(tensor):
+    """(C, H, W) float32 → (H, W, C) uint8. Matches Preprocessor._make_vis."""
+    return Preprocessor(None)._make_vis(tensor.cpu().float().numpy())
+
+
+def tif_to_tiles(path, p, is_mask=False):
+    """Load TIFF at tiling_size resolution and cut into tile_size patches."""
+    tile_size   = p.c['preprocess']['tile_size']
+    stride      = p.c['preprocess']['stride']
+    tiling_size = p.c['preprocess']['tiling_size']
+
+    interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
+    imagenet_norm = p.c['preprocess'].get('imagenet_norm', False)
+    arr = p.load_and_format(path, interp, standardize=not is_mask,
+                            is_mask=is_mask, target_size=tiling_size,
+                            imagenet_norm=imagenet_norm)
+    if not is_mask and p.c['preprocess'].get('collapse', False):
+        arr = p.collapse_channels(arr)
+
+    img_hwc = np.transpose(arr, (1, 2, 0))
+    H, W = img_hwc.shape[:2]
+
+    ys = list(range(0, H - tile_size + 1, stride))
+    xs = list(range(0, W - tile_size + 1, stride))
+
+    tiles = []
+    for y in ys:
+        for x in xs:
+            patch = img_hwc[y:y+tile_size, x:x+tile_size]
+            tiles.append(torch.from_numpy(np.transpose(patch, (2, 0, 1)).copy()))
+
+    return tiles, ys, xs, H, W, tile_size, stride, arr
+
+
+def stitch(tile_maps, ys, xs, H, W, tile_size, stride):
+    """Average-stitch single-channel (H,W) tile predictions into a full canvas."""
+    canvas = torch.zeros(H, W)
+    count  = torch.zeros(H, W)
+    for i, (y, x) in enumerate([(y, x) for y in ys for x in xs]):
+        canvas[y:y+tile_size, x:x+tile_size] += tile_maps[i]
+        count[y:y+tile_size,  x:x+tile_size] += 1
+    return canvas / count.clamp(min=1)
 
 
 def run_one(img_path, mask_path, model, device, p, threshold, title, output=None):
@@ -129,8 +197,8 @@ if __name__ == '__main__':
                      help='loop through all pairs from config raw_image_directory')
 
     parser.add_argument('-m', '--model',  required=True, help='path to checkpoint (.pth)')
-    parser.add_argument('-c', '--config', required=True,
-                        help='config JSON with preprocess section')
+    parser.add_argument('-c', '--config', default='config.json',
+                        help='config JSON with preprocess section (default: config.json)')
     parser.add_argument('--mask',         default=None,  help='ground-truth mask TIFF (single-image mode)')
     parser.add_argument('--output',       default=None,  help='save figure here instead of displaying')
     parser.add_argument('--threshold',    default=0.5, type=float,
