@@ -62,3 +62,18 @@
       will read. mismatching crop_size against the bottleneck doesn't break
       anything (resize handles it) but wastes capacity training features at a
       resolution they're never used at.
+
+- BYOL achieved 0.93 as opposed to 0.95 iou with old ssl
+    -catastrophically bad prediciton on first image: 21PControl-11-1of2
+    - significant islands on AJKY121-9-1
+    - slight islands on AJKV056-7
+    - islands are likely caused because these are "very human" hearts and the pig heart pretraining isnt receptive to their niche features
+    - almost perfect on all others 
+    - to be fair, the other ssl was trained for 400 epochs, this was only trained for 30
+    - BYOL has no noise like ssl did, no islands of foreground
+    - *failure is only on regions that have no morphology to guide segmentation (for example the artificial lines i drew when the ventricle was cut in half)
+    - in summary, this is likely the superior self-supervised training scheme, however, manual, per-case annotation is likely the best 
+    - loss decrease is also much noisier than the other model, around 10k iteratiors there was a massive decrease in iou, suggests that cosine decay lr would benefit this model and unstable gradients caused collapse
+- before removing the unneeded auxillary lost, this framework should be tested with augmentations to see if there is any difference
+    - doing this with cosine decay lr, and no auxillary loss
+    - see exact config in git commit: 

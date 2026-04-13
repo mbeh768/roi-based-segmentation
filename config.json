@@ -1,5 +1,5 @@
 {
-    "name": "overfit, no rot 90",
+    "name": "supervised_usingbyolglobal, no augs",
     "n_gpu": 1,
 
     "arch": {
@@ -9,7 +9,7 @@
             "in_ch": 1,
             "global_ch": 64,
             "bottleneck_dropout": 0.1,
-            "ssl_checkpoint": "/media/max/500GBSSD/machine_learning_projects/Mayo/att_vent_seg/saved/models/bottleneckssl/0409_193107/checkpoint-epoch100.pth"
+            "ssl_checkpoint": "/media/max/500GBSSD/machine_learning_projects/Mayo/att_vent_seg/saved/models/byol-dense/0412_183004/checkpoint-epoch30.pth"
         }
     },
     "data_loader": {
@@ -22,7 +22,7 @@
             "num_workers": 0,
             "hflip": 0.5,
             "vflip": 0.5,
-            "rot90": 0.0,
+            "rot90": 0.75,
             "visualize": "data/previews",
             "fg_ratio": 0.3,
             "fg_min": 0.05
@@ -41,10 +41,10 @@
         "iou", "accuracy"
     ],
     "lr_scheduler": {
-        "type": "StepLR",
+        "type": "CosineAnnealingLR",
         "args": {
-            "step_size": 9999,
-            "gamma": 1.0
+            "T_max": 682,
+            "eta_min": 1e-6
         }
     },
     "preprocess": {
@@ -70,6 +70,6 @@
         "early_stop": 100,
 
         "tensorboard": true,
-        "aux_loss_weight": 0.4
+        "aux_loss_weight": 0.0
     }
 }
