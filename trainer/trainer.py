@@ -347,14 +347,16 @@ class BYOLTrainer(BaseTrainer):
         self.train_metrics.reset()
         tau = self._current_momentum(epoch)
 
-        for batch_idx, (v1, v2, local_target, pos) in enumerate(self.data_loader):
+        for batch_idx, (v1, v2, local_target, pos, g1, g2) in enumerate(self.data_loader):
             v1 = v1.to(self.device)
             v2 = v2.to(self.device)
             local_target = local_target.to(self.device)
             pos = pos.to(self.device)
+            g1 = g1.to(self.device)
+            g2 = g2.to(self.device)
 
             self.optimizer.zero_grad()
-            z1, z2, t1, t2, local_recon, feat1 = self.model(v1, v2, pos)
+            z1, z2, t1, t2, local_recon, feat1 = self.model(v1, v2, pos, g1, g2)
             byol_loss = dense_byol(z1, z2, t1, t2)
             local_loss = F.mse_loss(local_recon, local_target)
             loss = byol_loss + self.local_loss_weight * local_loss
@@ -397,12 +399,14 @@ class BYOLTrainer(BaseTrainer):
         self.model.eval()
         self.valid_metrics.reset()
         with torch.no_grad():
-            for batch_idx, (v1, v2, local_target, pos) in enumerate(self.valid_data_loader):
+            for batch_idx, (v1, v2, local_target, pos, g1, g2) in enumerate(self.valid_data_loader):
                 v1 = v1.to(self.device)
                 v2 = v2.to(self.device)
                 local_target = local_target.to(self.device)
                 pos = pos.to(self.device)
-                z1, z2, t1, t2, local_recon, feat1 = self.model(v1, v2, pos)
+                g1 = g1.to(self.device)
+                g2 = g2.to(self.device)
+                z1, z2, t1, t2, local_recon, feat1 = self.model(v1, v2, pos, g1, g2)
                 byol_loss = dense_byol(z1, z2, t1, t2)
                 local_loss = F.mse_loss(local_recon, local_target)
                 loss = byol_loss + self.local_loss_weight * local_loss

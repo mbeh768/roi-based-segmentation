@@ -67,8 +67,8 @@ def main():
     rows = []
     with torch.no_grad():
         for batch in val_loader:
-            v1, v2, local_target, pos = [b.to(args.device) for b in batch]
-            _, _, _, _, local_recon, _ = model(v1, v2, pos)
+            v1, v2, local_target, pos, g1, g2 = [b.to(args.device) for b in batch]
+            _, _, _, _, local_recon, _ = model(v1, v2, pos, g1, g2)
 
             B = v1.shape[0]
             for i in range(B):

@@ -162,7 +162,6 @@ class SSLGlobalLocalDataLoader(BaseDataLoader):
 
 class BYOLDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1,
-                 crop_size=16,
                  noise_std=0.2, color_scale_range=0.3,
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.5,
@@ -170,7 +169,7 @@ class BYOLDataLoader(BaseDataLoader):
                  mask_ratio=0.0,
                  hflip=0.0, vflip=0.0, rot90=0.0):
         self.dataset = BYOLDataset(
-            data_dir, crop_size=crop_size,
+            data_dir,
             noise_std=noise_std, color_scale_range=color_scale_range,
             blur_kernel=blur_kernel,
             p_noise=p_noise, p_color=p_color, p_blur=p_blur,

@@ -9,33 +9,45 @@ import torchvision.transforms as T
 from torch.utils.data import Dataset
 
 
-def _geo_augment(*tensors, pos, flags):
-    """Apply enabled geometric augmentations to tensors and pos together.
+def _sample_geo_params(flags):
+    """Sample a per-view geometric aug as (hflip, vflip, k)."""
+    hflip = 1 if random.random() < flags.get('hflip', 0.0) else 0
+    vflip = 1 if random.random() < flags.get('vflip', 0.0) else 0
+    k = random.randint(1, 3) if random.random() < flags.get('rot90', 0.0) else 0
+    return (hflip, vflip, k)
 
-    flags: dict with keys {'hflip', 'vflip', 'rot90'} -> float in [0, 1]
-           (probability of applying each op; rot90 picks k in {1,2,3} uniformly
-           when triggered)
-    tensors: (C, H, W) tensors to transform identically
-    pos:     [y0, x0, y1, x1] normalised to [0, 1]
-    Returns: (*transformed_tensors, transformed_pos)
-    """
+
+def _apply_geo_tensor(t, params):
+    """Apply geo params (hflip, vflip, k) to a (C, H, W) tensor.
+    Op order: hflip -> vflip -> rot90_k (must match _apply_geo_pos)."""
+    hflip, vflip, k = params
+    if hflip:
+        t = torch.flip(t, [-1])
+    if vflip:
+        t = torch.flip(t, [-2])
+    if k:
+        t = torch.rot90(t, k, [-2, -1])
+    return t
+
+
+def _apply_geo_pos(pos, params):
+    """Apply geo params to normalised [y0, x0, y1, x1] pos."""
+    hflip, vflip, k = params
     y0, x0, y1, x1 = pos[0], pos[1], pos[2], pos[3]
-
-    if random.random() < flags.get('hflip', 0.0):
-        tensors = tuple(torch.flip(t, [-1]) for t in tensors)
+    if hflip:
         x0, x1 = 1 - x1, 1 - x0
-
-    if random.random() < flags.get('vflip', 0.0):
-        tensors = tuple(torch.flip(t, [-2]) for t in tensors)
+    if vflip:
         y0, y1 = 1 - y1, 1 - y0
+    for _ in range(k):
+        y0, x0, y1, x1 = 1 - x1, y0, 1 - x0, y1
+    return torch.tensor([y0, x0, y1, x1], dtype=pos.dtype)
 
-    if random.random() < flags.get('rot90', 0.0):
-        k = random.randint(1, 3)  # 90° CCW rotation steps (matches torch.rot90)
-        tensors = tuple(torch.rot90(t, k, [-2, -1]) for t in tensors)
-        for _ in range(k):
-            y0, x0, y1, x1 = 1 - x1, y0, 1 - x0, y1
 
-    pos = torch.tensor([y0, x0, y1, x1], dtype=pos.dtype)
+def _geo_augment(*tensors, pos, flags):
+    """Back-compat: sample one set of geo params and apply to all tensors + pos."""
+    params = _sample_geo_params(flags)
+    tensors = tuple(_apply_geo_tensor(t, params) for t in tensors)
+    pos = _apply_geo_pos(pos, params)
     return (*tensors, pos)
 
 
@@ -348,15 +360,18 @@ class SSLGlobalLocalDataset(Dataset):
 
 class BYOLDataset(Dataset):
     """
-    Returns two photometrically-augmented views of a global image, the local
-    tile downsampled to crop_size as the auxiliary reconstruction target, and
-    the tile's normalized position in the global.
+    Returns two photometrically- and geometrically-augmented views of a global
+    image, the full local tile as the auxiliary reconstruction target, the
+    tile's normalized position in the global, and per-view geometric aug
+    params so the model can unwarp features back to canonical frame before
+    dense BYOL loss.
 
-    Each __getitem__ yields (v1_global, v2_global, local_target, pos).
-    A shared geometric aug is applied to global + local + pos so the cropped
-    global feature region at pos spatially aligns with local_target.
+    Each __getitem__ yields (v1_global, v2_global, local_target, pos, g1, g2).
+    g1 and g2 are int64 tensors of shape (3,) = (hflip, vflip, rot90_k).
+    pos and local_target are transformed with g1 so they align with v1's frame
+    (the view the local_head decodes from).
     """
-    def __init__(self, data_dir, crop_size=16,
+    def __init__(self, data_dir,
                  noise_std=0.2, color_scale_range=0.3,
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.5,
@@ -365,7 +380,6 @@ class BYOLDataset(Dataset):
                  hflip=0.0, vflip=0.0, rot90=0.0):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
-        self.crop_size = crop_size
         self.mask_ratio = mask_ratio
         self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
         self.augment = any(v > 0 for v in self.aug_flags.values())
@@ -404,16 +418,22 @@ class BYOLDataset(Dataset):
         pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
 
         if self.augment:
-            glob, local, pos = _geo_augment(glob, local, pos=pos, flags=self.aug_flags)
+            g1 = _sample_geo_params(self.aug_flags)
+            g2 = _sample_geo_params(self.aug_flags)
+        else:
+            g1 = g2 = (0, 0, 0)
 
-        v1 = self.photo_transform(glob.clone())
-        v2 = self.photo_transform(glob.clone())
+        v1 = _apply_geo_tensor(glob.clone(), g1)
+        v2 = _apply_geo_tensor(glob.clone(), g2)
+        local_target = _apply_geo_tensor(local, g1)
+        pos = _apply_geo_pos(pos, g1)
+
+        v1 = self.photo_transform(v1)
+        v2 = self.photo_transform(v2)
         if self.erase is not None:
             v1 = self.erase(v1)
             v2 = self.erase(v2)
-        local_target = F.interpolate(
-            local.unsqueeze(0),
-            size=(self.crop_size, self.crop_size),
-            mode='bilinear', align_corners=True,
-        ).squeeze(0)
-        return v1, v2, local_target, pos
+
+        g1_t = torch.tensor(g1, dtype=torch.long)
+        g2_t = torch.tensor(g2, dtype=torch.long)
+        return v1, v2, local_target, pos, g1_t, g2_t

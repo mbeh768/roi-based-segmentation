@@ -1,7 +1,31 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from base import BaseModel
+
+
+def _inverse_geo_feat(x, g):
+    """Unwarp a (B, C, H, W) feature map back to canonical frame per-sample.
+
+    g: (B, 3) long tensor where each row is (hflip, vflip, rot90_k) — the
+    forward geometric aug applied to produce the view this feature came from.
+    The forward order was hflip -> vflip -> rot90_k, so the inverse applies
+    rot90_{-k} -> vflip -> hflip.
+    """
+    out = []
+    for i in range(x.shape[0]):
+        xi = x[i:i+1]
+        hf, vf, k = int(g[i, 0]), int(g[i, 1]), int(g[i, 2])
+        if k:
+            xi = torch.rot90(xi, -k, dims=[-2, -1])
+        if vf:
+            xi = torch.flip(xi, dims=[-2])
+        if hf:
+            xi = torch.flip(xi, dims=[-1])
+        out.append(xi)
+    return torch.cat(out, dim=0)
 
 
 def _crop_and_resize(feat, pos, out_h, out_w):
@@ -217,10 +241,12 @@ class BYOLDenseUNet(BaseModel):
     stop-grad), with per-pixel normalized-MSE symmetrized across views.
 
     An auxiliary crop-to-local decoder keeps the cropped global features
-    semantically grounded: features cropped from feat1 at pos are decoded by a
-    throwaway local_head to predict the downsampled local tile (pixel MSE).
-    Only unet, projector, predictor and local_head receive gradients; the local
-    tile is never pushed through the unet.
+    semantically grounded: features cropped from feat1 at pos are upsampled by
+    a throwaway local_head to predict the full-resolution local tile (pixel
+    MSE). This mirrors the downstream task where the bottleneck crop feeds a
+    decoder that reconstructs the local tile. Only unet, projector, predictor
+    and local_head receive gradients; the local tile is never pushed through
+    the unet.
 
     After pretraining, transfer self.unet weights to LocalGlobalUNet.global_enc
     (same convention as SSLGlobalUNet — keys start with "unet.").
@@ -230,24 +256,30 @@ class BYOLDenseUNet(BaseModel):
             "in_ch": 1, "out_ch": 64,
             "proj_hidden": 128, "proj_dim": 128,
             "momentum": 0.996,
-            "crop_size": 16
+            "crop_size": 16, "local_size": 256
         }}
     """
     def __init__(self, in_ch=1, out_ch=64, proj_hidden=128, proj_dim=128,
-                 momentum=0.996, crop_size=16):
+                 momentum=0.996, crop_size=16, local_size=256):
         super().__init__()
         self.momentum = momentum
         self.crop_size = crop_size
+        self.local_size = local_size
 
         self.unet = _GlobalUNet(in_ch=in_ch, out_ch=out_ch)
         self.projector = _dense_mlp(out_ch, proj_hidden, proj_dim)
         self.predictor = _dense_mlp(proj_dim, proj_hidden, proj_dim)
 
-        self.local_head = nn.Sequential(
-            _double_conv(out_ch, out_ch),
-            _double_conv(out_ch, out_ch),
-            nn.Conv2d(out_ch, in_ch, kernel_size=1),
-        )
+        ratio = local_size / crop_size
+        n_up = int(round(math.log2(ratio)))
+        assert 2 ** n_up == int(ratio), \
+            f"local_size/crop_size must be a power of two (got {local_size}/{crop_size})"
+        layers = []
+        for _ in range(n_up):
+            layers.append(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False))
+            layers.append(_double_conv(out_ch, out_ch))
+        layers.append(nn.Conv2d(out_ch, in_ch, kernel_size=1))
+        self.local_head = nn.Sequential(*layers)
 
         self.target_unet = _GlobalUNet(in_ch=in_ch, out_ch=out_ch)
         self.target_projector = _dense_mlp(out_ch, proj_hidden, proj_dim)
@@ -272,12 +304,14 @@ class BYOLDenseUNet(BaseModel):
         for p_o, p_t in zip(self.projector.parameters(), self.target_projector.parameters()):
             p_t.data.mul_(m).add_(p_o.data, alpha=1 - m)
 
-    def forward(self, v1, v2, pos):
+    def forward(self, v1, v2, pos, g1, g2):
         feat1 = self.unet(v1)
         feat2 = self.unet(v2)
         z1 = self.predictor(self.projector(feat1))
         z2 = self.predictor(self.projector(feat2))
 
+        # local_head decodes in v1's frame (pos and local_target are aligned
+        # with v1 by the dataset).
         cs = self.crop_size
         local_feat = _crop_and_resize(feat1, pos, cs, cs)
         local_recon = self.local_head(local_feat)
@@ -285,4 +319,13 @@ class BYOLDenseUNet(BaseModel):
         with torch.no_grad():
             t1 = self.target_projector(self.target_unet(v1))
             t2 = self.target_projector(self.target_unet(v2))
+
+        # Each view had an independent geometric aug, so z_i / t_i live in
+        # different frames. Unwarp to canonical so per-pixel dense BYOL
+        # aligns corresponding spatial locations across views.
+        z1 = _inverse_geo_feat(z1, g1)
+        z2 = _inverse_geo_feat(z2, g2)
+        t1 = _inverse_geo_feat(t1, g1)
+        t2 = _inverse_geo_feat(t2, g2)
+
         return z1, z2, t1, t2, local_recon, feat1
