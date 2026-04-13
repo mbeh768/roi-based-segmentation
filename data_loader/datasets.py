@@ -392,6 +392,16 @@ class BYOLDataset(Dataset):
             T.RandomApply([T.Lambda(lambda x: -x)], p=p_intensity_invert),
         ])
 
+        self.items = []
+        for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
+            stem = coords_file.parent.name
+            with open(coords_file) as f:
+                entries = json.load(f)
+            for entry in entries:
+                patch_path = coords_file.parent / entry['filename']
+                self.items.append((patch_path, stem, entry))
+        assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
+
     def _sparse_mask(self, x):
         """MAE-style patch masking: zero out mask_ratio fraction of
         mask_patch_size x mask_patch_size patches."""
@@ -410,16 +420,6 @@ class BYOLDataset(Dataset):
         patch_mask = patch_mask.view(1, gh, gw)
         pixel_mask = patch_mask.repeat_interleave(ps, dim=-2).repeat_interleave(ps, dim=-1)
         return x * pixel_mask
-
-        self.items = []
-        for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
-            stem = coords_file.parent.name
-            with open(coords_file) as f:
-                entries = json.load(f)
-            for entry in entries:
-                patch_path = coords_file.parent / entry['filename']
-                self.items.append((patch_path, stem, entry))
-        assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
 
     def __len__(self):
         return len(self.items)
