@@ -354,13 +354,15 @@ class MAEGlobalUNet(BaseModel):
         }}
     """
     def __init__(self, in_ch=1, out_ch=64,
-                 crop_size=16, local_size=256,
+                 crop_size=16, local_size=256, target_multiplier=2,
                  mask_ratio=0.5, mask_patch_size=16,
                  noise_std=0.1, color_scale_range=0.15, blur_kernel=7,
                  p_noise=0.3, p_color=0.3, p_blur=0.3, p_intensity_invert=0.0):
         super().__init__()
         self.crop_size = crop_size
         self.local_size = local_size
+        self.target_multiplier = target_multiplier
+        self.target_size = crop_size * target_multiplier
         self.mask_ratio = mask_ratio
         self.mask_patch_size = mask_patch_size
         self.noise_std = noise_std
@@ -373,10 +375,9 @@ class MAEGlobalUNet(BaseModel):
 
         self.unet = _GlobalUNet(in_ch=in_ch, out_ch=out_ch)
 
-        ratio = local_size / crop_size
-        n_up = int(round(math.log2(ratio)))
-        assert 2 ** n_up == int(ratio), \
-            f"local_size/crop_size must be a power of two (got {local_size}/{crop_size})"
+        n_up = int(round(math.log2(target_multiplier)))
+        assert 2 ** n_up == int(target_multiplier), \
+            f"target_multiplier must be a power of two (got {target_multiplier})"
         layers = []
         for _ in range(n_up):
             layers.append(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False))
@@ -436,14 +437,19 @@ class MAEGlobalUNet(BaseModel):
         pixel_mask = patch_mask.repeat_interleave(ps, dim=-2).repeat_interleave(ps, dim=-1)
         return x * pixel_mask
 
-    def encode(self, glob):
-        """Photo-aug + mask on GPU, then run the UNet. Returns dense features."""
+    def prepare_input(self, glob):
+        """Photo-aug + sparse mask on GPU. Returns the tensor the encoder sees."""
         x = self._photo_augment(glob)
         x = self._sparse_mask(x)
-        return self.unet(x)
+        return x
+
+    def encode(self, glob):
+        """Photo-aug + mask on GPU, then run the UNet. Returns (feat, x_viewed)."""
+        x = self.prepare_input(glob)
+        return self.unet(x), x
 
     def decode(self, feat, pos):
-        """Crop feat at pos and upsample to local_size via local_head.
+        """Crop feat at pos and upsample to target_size via local_head.
 
         feat: (M, C, H, W), pos: (M, 4) — caller aligns batch dims.
         """
@@ -451,4 +457,5 @@ class MAEGlobalUNet(BaseModel):
         return self.local_head(local_feat)
 
     def forward(self, glob):
-        return self.encode(glob)
+        feat, _ = self.encode(glob)
+        return feat

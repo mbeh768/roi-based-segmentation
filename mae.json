@@ -9,6 +9,7 @@
             "out_ch": 64,
             "crop_size": 16,
             "local_size": 256,
+            "target_multiplier": 2,
             "mask_ratio": 0.5,
             "mask_patch_size": 16,
             "noise_std": 0.1,

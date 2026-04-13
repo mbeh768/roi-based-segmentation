@@ -1,5 +1,5 @@
 {
-    "name": "byol_static_supervised",
+    "name": "MAE_static_supervised",
     "n_gpu": 1,
 
     "arch": {
@@ -9,7 +9,7 @@
             "in_ch": 1,
             "global_ch": 64,
             "bottleneck_dropout": 0.1,
-            "ssl_checkpoint": "saved/models/byol-full_res_local_normmse_sparse_masking/0413_104213/checkpoint-epoch30.pth"
+            "ssl_checkpoint": "saved/models/mae-inital implementation/0413_134746/checkpoint-epoch60.pth"
         }
     },
     "data_loader": {

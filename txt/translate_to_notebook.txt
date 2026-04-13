@@ -86,6 +86,7 @@
 - doing sparse masking instead of huge patch removal, huge patches were causing noisy gradients for local because edges of the patch would appear as relevant morphology
     - sparse mask experiment, fixed the local issue, but leads me to beleive byol componenet is unneeded
     - should just use masked MAE for local reconstruction, there are too many global augmentations as-is
-    - TODO: masked reconstruction with less agressive photometric augmentations on local only (no byol) would likely out perform this, although reconstruction grids look very good
+    - BYOL pretraining acheived arguably better performance when augmentations were introduced (~90 iou with significant fluctutation after 800 epochs, fluctionates 0.98-0.7 by the end)
+    - masked reconstruction with less agressive photometric augmentations on local only (no byol) would likely out perform this, although reconstruction grids look very good
         - paper uses 16x16 masking cells, i think 8x8 is more viable here because morphology is much more erratic than the imagenet case
         - would also be wise to not compute loss on provided patches, as the paper does

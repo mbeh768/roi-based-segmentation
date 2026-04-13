@@ -567,16 +567,19 @@ class MAETrainer(BaseTrainer):
         Returns (mean_loss_float, feat_detached_std_input, last_recon, last_target).
         """
         model = self._unwrapped()
-        feat = model.encode(glob)
+        feat, _ = model.encode(glob)
         B, N = tiles.shape[0], tiles.shape[1]
         chunks = self._enumerate_chunks(B, N)
         total_tiles = sum(e - s for _, s, e in chunks)
         last_recon = last_target = None
         total_loss_val = 0.0
 
+        target_size = model.target_size
         for ci, (b, start, end) in enumerate(chunks):
             pos_chunk = positions[b, start:end]
             tgt_chunk = tiles[b, start:end]
+            if tgt_chunk.shape[-1] != target_size:
+                tgt_chunk = F.interpolate(tgt_chunk, size=target_size, mode='area')
             m = pos_chunk.shape[0]
             feat_rep = feat[b:b+1].expand(m, -1, -1, -1).contiguous()
             recon = model.decode(feat_rep, pos_chunk)
@@ -668,7 +671,7 @@ class MAETrainer(BaseTrainer):
                 glob = glob.to(self.device)
                 tiles = tiles.to(self.device)
                 positions = positions.to(self.device)
-                feat = model.encode(glob)
+                feat, x_viewed = model.encode(glob)
                 B, N = tiles.shape[0], tiles.shape[1]
                 for b in range(B):
                     if collected >= self.save_grid_n:
@@ -678,8 +681,11 @@ class MAETrainer(BaseTrainer):
                     pos_one = positions[b, ti:ti+1]
                     tgt_one = tiles[b, ti]
                     recon_one = model.decode(feat_b, pos_one)[0]
+                    target_size = model.target_size
+                    if tgt_one.shape[-1] != target_size:
+                        tgt_one = F.interpolate(tgt_one.unsqueeze(0), size=target_size, mode='area')[0]
                     panels = [
-                        BYOLTrainer._label(BYOLTrainer._draw_pos(BYOLTrainer._to_img(glob[b]), pos_one[0]), 'global'),
+                        BYOLTrainer._label(BYOLTrainer._draw_pos(BYOLTrainer._to_img(x_viewed[b]), pos_one[0]), 'global'),
                         BYOLTrainer._label(BYOLTrainer._to_img(tgt_one, interp=cv2.INTER_NEAREST), 'local_target'),
                         BYOLTrainer._label(BYOLTrainer._to_img(recon_one, interp=cv2.INTER_NEAREST), 'local_recon'),
                     ]
