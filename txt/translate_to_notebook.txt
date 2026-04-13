@@ -81,3 +81,6 @@
 
 [04-13-2026]
 - rerunning byol with deletion and cosine annealing to decrease after 40 epochs, training for full 40 epochs, also making augmentations harder, adding deletion
+- using full res for local reconstuction helped things, also switched to norm mse which helped blurry outputs
+- *it would be worth trying norm mse on the old ssl
+- doing sparse masking instead of huge patch removal, huge patches were causing noisy gradients for local because edges of the patch would appear as relevant morphology

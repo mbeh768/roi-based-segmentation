@@ -376,11 +376,12 @@ class BYOLDataset(Dataset):
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.5,
                  p_intensity_invert=0.2,
-                 mask_ratio=0.0,
+                 mask_ratio=0.0, mask_patch_size=16,
                  hflip=0.0, vflip=0.0, rot90=0.0):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_ratio = mask_ratio
+        self.mask_patch_size = mask_patch_size
         self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
         self.augment = any(v > 0 for v in self.aug_flags.values())
 
@@ -390,9 +391,25 @@ class BYOLDataset(Dataset):
             T.RandomApply([T.GaussianBlur(kernel_size=blur_kernel, sigma=(0.1, 2.0))], p=p_blur),
             T.RandomApply([T.Lambda(lambda x: -x)], p=p_intensity_invert),
         ])
-        self.erase = (T.RandomErasing(p=1.0, scale=(mask_ratio * 0.5, mask_ratio),
-                                      ratio=(0.3, 3.3), value=0)
-                      if mask_ratio > 0 else None)
+
+    def _sparse_mask(self, x):
+        """MAE-style patch masking: zero out mask_ratio fraction of
+        mask_patch_size x mask_patch_size patches."""
+        if self.mask_ratio <= 0:
+            return x
+        _, H, W = x.shape
+        ps = self.mask_patch_size
+        gh, gw = H // ps, W // ps
+        n_patches = gh * gw
+        n_mask = int(round(n_patches * self.mask_ratio))
+        if n_mask == 0:
+            return x
+        idx = torch.randperm(n_patches)[:n_mask]
+        patch_mask = torch.ones(n_patches, dtype=x.dtype)
+        patch_mask[idx] = 0
+        patch_mask = patch_mask.view(1, gh, gw)
+        pixel_mask = patch_mask.repeat_interleave(ps, dim=-2).repeat_interleave(ps, dim=-1)
+        return x * pixel_mask
 
         self.items = []
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
@@ -430,9 +447,8 @@ class BYOLDataset(Dataset):
 
         v1 = self.photo_transform(v1)
         v2 = self.photo_transform(v2)
-        if self.erase is not None:
-            v1 = self.erase(v1)
-            v2 = self.erase(v2)
+        v1 = self._sparse_mask(v1)
+        v2 = self._sparse_mask(v2)
 
         g1_t = torch.tensor(g1, dtype=torch.long)
         g2_t = torch.tensor(g2, dtype=torch.long)
