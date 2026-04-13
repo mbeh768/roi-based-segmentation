@@ -1,6 +1,8 @@
 import math
+from pathlib import Path
 
 import numpy as np
+import cv2
 import torch
 from torchvision.utils import make_grid
 from base import BaseTrainer
@@ -321,6 +323,8 @@ class BYOLTrainer(BaseTrainer):
         self.base_momentum = self._unwrapped().momentum
         self.total_epochs = config['trainer']['epochs']
         self.local_loss_weight = config['trainer'].get('local_loss_weight', 1.0)
+        self.save_grid_period = config['trainer'].get('save_grid_period', 0)
+        self.save_grid_n = config['trainer'].get('save_grid_n', 12)
 
         self.train_metrics = MetricTracker(
             'loss', 'byol_loss', 'local_loss', 'feat_std',
@@ -341,6 +345,68 @@ class BYOLTrainer(BaseTrainer):
     def _feat_std(self, feat):
         f = feat.detach().permute(0, 2, 3, 1).reshape(-1, feat.shape[1])
         return f.std(dim=0).mean().item()
+
+    @staticmethod
+    def _to_img(t, tile_h=256, interp=cv2.INTER_LINEAR):
+        t = t.detach().cpu().float()
+        lo, hi = t.min(), t.max()
+        t = (t - lo) / (hi - lo + 1e-8)
+        arr = (t.numpy() * 255).astype(np.uint8)
+        if arr.ndim == 3:
+            if arr.shape[0] == 1:
+                arr = np.repeat(arr, 3, axis=0)
+            arr = arr.transpose(1, 2, 0)
+            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        return cv2.resize(arr, (tile_h, tile_h), interpolation=interp)
+
+    @staticmethod
+    def _draw_pos(img, pos):
+        H, W = img.shape[:2]
+        y0, x0, y1, x1 = pos.tolist()
+        return cv2.rectangle(img.copy(),
+                             (int(x0 * W), int(y0 * H)),
+                             (int(x1 * W), int(y1 * H)),
+                             (0, 255, 0), 2)
+
+    @staticmethod
+    def _label(img, text):
+        cv2.putText(img, text, (6, 22), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6, (0, 255, 0), 2)
+        return img
+
+    def _save_grid(self, epoch):
+        loader = self.valid_data_loader if self.valid_data_loader is not None else self.data_loader
+        if loader is None:
+            return
+        out_dir = Path(self.checkpoint_dir) / 'byol_grid'
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        self.model.eval()
+        rows = []
+        collected = 0
+        with torch.no_grad():
+            for batch in loader:
+                v1, v2, local_target, pos, g1, g2 = [b.to(self.device) for b in batch]
+                _, _, _, _, local_recon, _ = self.model(v1, v2, pos, g1, g2)
+                B = v1.shape[0]
+                for i in range(B):
+                    if collected >= self.save_grid_n:
+                        break
+                    panels = [
+                        self._label(self._draw_pos(self._to_img(v1[i]), pos[i]), 'view1'),
+                        self._label(self._draw_pos(self._to_img(v2[i]), pos[i]), 'view2'),
+                        self._label(self._to_img(local_target[i], interp=cv2.INTER_NEAREST), 'local_target'),
+                        self._label(self._to_img(local_recon[i], interp=cv2.INTER_NEAREST), 'local_recon'),
+                    ]
+                    rows.append(np.concatenate(panels, axis=1))
+                    collected += 1
+                if collected >= self.save_grid_n:
+                    break
+
+        if rows:
+            grid = np.concatenate(rows, axis=0)
+            cv2.imwrite(str(out_dir / f'grid_epoch{epoch}.png'), grid)
+            self.logger.info(f'Saved BYOL grid ({collected} samples) for epoch {epoch}')
 
     def _train_epoch(self, epoch):
         self.model.train()
@@ -390,6 +456,9 @@ class BYOLTrainer(BaseTrainer):
         if self.do_validation:
             val_log = self._valid_epoch(epoch)
             log.update(**{'val_' + k: v for k, v in val_log.items()})
+
+        if self.save_grid_period > 0 and epoch % self.save_grid_period == 0:
+            self._save_grid(epoch)
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
