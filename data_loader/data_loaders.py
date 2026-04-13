@@ -2,7 +2,7 @@ import numpy as np
 from collections import defaultdict
 from torch.utils.data.sampler import Sampler, SubsetRandomSampler
 from base import BaseDataLoader
-from data_loader.datasets import GlobalDataset, LocalDataset, LocalGlobalDataset, SSLGlobalLocalDataset, BYOLDataset
+from data_loader.datasets import GlobalDataset, LocalDataset, LocalGlobalDataset, SSLGlobalLocalDataset, BYOLDataset, MAEDataset
 
 
 class ForegroundBalancedSampler(Sampler):
@@ -197,6 +197,33 @@ class BYOLDataLoader(BaseDataLoader):
 
         train_idx = [i for s in train_stems for i in stem_to_indices[s]]
         val_idx   = [i for s in val_stems   for i in stem_to_indices[s]]
+
+        self.shuffle = False
+        self.n_samples = len(train_idx)
+
+        return SubsetRandomSampler(train_idx), SubsetRandomSampler(val_idx)
+
+
+class MAEDataLoader(BaseDataLoader):
+    """One item per global (with all its tiles). Split is item-level, so
+    stems are already disjoint between train and val by construction."""
+    def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0, num_workers=1,
+                 hflip=0.0, vflip=0.0, rot90=0.0):
+        self.dataset = MAEDataset(data_dir, hflip=hflip, vflip=vflip, rot90=rot90)
+        super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
+
+    def _split_sampler(self, split):
+        if split == 0.0:
+            return None, None
+
+        n = len(self.dataset)
+        np.random.seed(0)
+        indices = np.arange(n)
+        np.random.shuffle(indices)
+
+        n_val = split if isinstance(split, int) else max(1, int(n * split))
+        val_idx = indices[:n_val].tolist()
+        train_idx = indices[n_val:].tolist()
 
         self.shuffle = False
         self.n_samples = len(train_idx)

@@ -329,3 +329,126 @@ class BYOLDenseUNet(BaseModel):
         t2 = _inverse_geo_feat(t2, g2)
 
         return z1, z2, t1, t2, local_recon, feat1
+
+
+class MAEGlobalUNet(BaseModel):
+    """
+    Masked-input UNet SSL: the UNet encodes a GPU-augmented + sparsely-masked
+    global, producing dense features. For every tile in the global, those
+    features are cropped at the tile's pos and decoded by a throwaway
+    local_head to predict the full-res (un-augmented) local tile. Photometric
+    aug and masking happen on the GPU here (not in the dataset) so targets
+    stay clean and CPU work is minimal.
+
+    After pretraining, transfer self.unet weights to LocalGlobalUNet.global_enc
+    (keys start with "unet.", same convention as BYOLDenseUNet / SSLGlobalUNet).
+
+    Config:
+        "arch": {"type": "MAEGlobalUNet", "args": {
+            "in_ch": 1, "out_ch": 64,
+            "crop_size": 16, "local_size": 256,
+            "mask_ratio": 0.5, "mask_patch_size": 16,
+            "noise_std": 0.1, "color_scale_range": 0.15,
+            "blur_kernel": 7, "p_noise": 0.3, "p_color": 0.3, "p_blur": 0.3,
+            "p_intensity_invert": 0.0
+        }}
+    """
+    def __init__(self, in_ch=1, out_ch=64,
+                 crop_size=16, local_size=256,
+                 mask_ratio=0.5, mask_patch_size=16,
+                 noise_std=0.1, color_scale_range=0.15, blur_kernel=7,
+                 p_noise=0.3, p_color=0.3, p_blur=0.3, p_intensity_invert=0.0):
+        super().__init__()
+        self.crop_size = crop_size
+        self.local_size = local_size
+        self.mask_ratio = mask_ratio
+        self.mask_patch_size = mask_patch_size
+        self.noise_std = noise_std
+        self.color_scale_range = color_scale_range
+        self.blur_kernel = blur_kernel
+        self.p_noise = p_noise
+        self.p_color = p_color
+        self.p_blur = p_blur
+        self.p_intensity_invert = p_intensity_invert
+
+        self.unet = _GlobalUNet(in_ch=in_ch, out_ch=out_ch)
+
+        ratio = local_size / crop_size
+        n_up = int(round(math.log2(ratio)))
+        assert 2 ** n_up == int(ratio), \
+            f"local_size/crop_size must be a power of two (got {local_size}/{crop_size})"
+        layers = []
+        for _ in range(n_up):
+            layers.append(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False))
+            layers.append(_double_conv(out_ch, out_ch))
+        layers.append(nn.Conv2d(out_ch, in_ch, kernel_size=1))
+        self.local_head = nn.Sequential(*layers)
+
+    def _photo_augment(self, x):
+        """GPU-side photometric augmentation on (B, C, H, W)."""
+        B, C = x.shape[0], x.shape[1]
+        if self.p_noise > 0:
+            m = (torch.rand(B, 1, 1, 1, device=x.device) < self.p_noise).float()
+            x = x + m * torch.randn_like(x) * self.noise_std
+        if self.p_color > 0:
+            m = (torch.rand(B, 1, 1, 1, device=x.device) < self.p_color).float()
+            scale = 1.0 + (torch.rand(B, C, 1, 1, device=x.device) * 2 - 1) * self.color_scale_range
+            x = x * (m * scale + (1 - m))
+        if self.p_blur > 0:
+            m = (torch.rand(B, 1, 1, 1, device=x.device) < self.p_blur).float()
+            x_blur = self._gaussian_blur(x)
+            x = m * x_blur + (1 - m) * x
+        if self.p_intensity_invert > 0:
+            m = (torch.rand(B, 1, 1, 1, device=x.device) < self.p_intensity_invert).float()
+            x = (1 - m) * x + m * (-x)
+        return x
+
+    def _gaussian_blur(self, x):
+        k = self.blur_kernel
+        sigma = torch.empty(1, device=x.device).uniform_(0.1, 2.0).item()
+        ax = torch.arange(k, device=x.device, dtype=x.dtype) - (k - 1) / 2
+        g = torch.exp(-0.5 * (ax / sigma) ** 2)
+        g = g / g.sum()
+        kx = g.view(1, 1, 1, k).expand(x.shape[1], 1, 1, k)
+        ky = g.view(1, 1, k, 1).expand(x.shape[1], 1, k, 1)
+        pad = k // 2
+        x = F.conv2d(x, kx, padding=(0, pad), groups=x.shape[1])
+        x = F.conv2d(x, ky, padding=(pad, 0), groups=x.shape[1])
+        return x
+
+    def _sparse_mask(self, x):
+        """Per-sample MAE-style patch masking: zero mask_ratio fraction of
+        mask_patch_size x mask_patch_size blocks independently per sample."""
+        if self.mask_ratio <= 0:
+            return x
+        B, _, H, W = x.shape
+        ps = self.mask_patch_size
+        gh, gw = H // ps, W // ps
+        n_patches = gh * gw
+        n_mask = int(round(n_patches * self.mask_ratio))
+        if n_mask == 0:
+            return x
+        noise = torch.rand(B, n_patches, device=x.device)
+        idx = noise.argsort(dim=1)[:, :n_mask]
+        patch_mask = torch.ones(B, n_patches, device=x.device, dtype=x.dtype)
+        patch_mask.scatter_(1, idx, 0)
+        patch_mask = patch_mask.view(B, 1, gh, gw)
+        pixel_mask = patch_mask.repeat_interleave(ps, dim=-2).repeat_interleave(ps, dim=-1)
+        return x * pixel_mask
+
+    def encode(self, glob):
+        """Photo-aug + mask on GPU, then run the UNet. Returns dense features."""
+        x = self._photo_augment(glob)
+        x = self._sparse_mask(x)
+        return self.unet(x)
+
+    def decode(self, feat, pos):
+        """Crop feat at pos and upsample to local_size via local_head.
+
+        feat: (M, C, H, W), pos: (M, 4) — caller aligns batch dims.
+        """
+        local_feat = _crop_and_resize(feat, pos, self.crop_size, self.crop_size)
+        return self.local_head(local_feat)
+
+    def forward(self, glob):
+        return self.encode(glob)

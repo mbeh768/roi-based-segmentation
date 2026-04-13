@@ -1,0 +1,83 @@
+{
+    "name": "mae-inital implementation",
+    "n_gpu": 1,
+
+    "arch": {
+        "type": "MAEGlobalUNet",
+        "args": {
+            "in_ch": 1,
+            "out_ch": 64,
+            "crop_size": 16,
+            "local_size": 256,
+            "mask_ratio": 0.5,
+            "mask_patch_size": 16,
+            "noise_std": 0.1,
+            "color_scale_range": 0.15,
+            "blur_kernel": 7,
+            "p_noise": 0.3,
+            "p_color": 0.3,
+            "p_blur": 0.3,
+            "p_intensity_invert": 0.0
+        }
+    },
+    "data_loader": {
+        "type": "MAEDataLoader",
+        "args": {
+            "data_dir": "data/ssl",
+            "batch_size": 20,
+            "shuffle": true,
+            "validation_split": 0.0,
+            "num_workers": 2,
+            "hflip": 0.5,
+            "vflip": 0.5,
+            "rot90": 0.75
+        }
+    },
+    "optimizer": {
+        "type": "Adam",
+        "args": {
+            "lr": 3e-4,
+            "weight_decay": 1e-6,
+            "amsgrad": true
+        }
+    },
+    "loss": "pixel_norm_mse",
+    "metrics": [],
+    "lr_scheduler": {
+        "type": "CosineAnnealingLR",
+        "args": {
+            "T_max": 60,
+            "eta_min": 1e-5
+        }
+    },
+
+    "preprocess": {
+        "raw_image_directory": "/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26",
+        "global_downsample": 256,
+        "czi_max_px": 4000000000,
+        "tiling_size": 2048,
+        "tile_size": 256,
+        "stride": 256,
+        "handle_missing_or_additional_channels": false,
+        "standardize": true,
+        "imagenet_norm": false,
+        "collapse": true
+    },
+
+    "trainer": {
+        "epochs": 60,
+
+        "save_dir": "saved/",
+        "save_period": 10,
+        "verbosity": 2,
+
+        "monitor": "off",
+        "early_stop": 10000,
+
+        "tensorboard": true,
+        "local_loss": "pixel_norm_mse",
+        "tile_minibatch_size": 64,
+        "save_grid_period": 2,
+        "save_grid_n": 12
+    }
+}

@@ -453,3 +453,59 @@ class BYOLDataset(Dataset):
         g1_t = torch.tensor(g1, dtype=torch.long)
         g2_t = torch.tensor(g2, dtype=torch.long)
         return v1, v2, local_target, pos, g1_t, g2_t
+
+
+class MAEDataset(Dataset):
+    """
+    One item = one global image + all its local tiles + positions.
+
+    A shared geometric aug is sampled per item and applied identically to the
+    global, every tile, and every pos. Photometric aug and masking happen on
+    the GPU inside the model's forward (not here) so targets stay clean and
+    CPU stays light.
+
+    __getitem__ returns (glob, tiles, positions) where:
+        glob      : (C, H, W) float32
+        tiles     : (N, C, h, w) float32
+        positions : (N, 4)      float32   — [y0, x0, y1, x1] in [0, 1]
+    Every global is assumed to have the same number of tiles N.
+    """
+    def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0):
+        data_dir = Path(data_dir)
+        self.image_dir = data_dir / 'images'
+        self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
+        self.augment = any(v > 0 for v in self.aug_flags.values())
+
+        self.items = []
+        for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
+            stem = coords_file.parent.name
+            with open(coords_file) as f:
+                entries = json.load(f)
+            self.items.append((stem, entries))
+        assert len(self.items) > 0, f"No coordinates.json found under {self.image_dir}"
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, idx):
+        stem, entries = self.items[idx]
+        glob = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
+
+        H, W = entries[0]['image_H'], entries[0]['image_W']
+        tiles = []
+        positions = []
+        for entry in entries:
+            tile = torch.load(self.image_dir / stem / entry['filename'], weights_only=True)
+            tiles.append(tile)
+            y, x, h, w = entry['y'], entry['x'], entry['height'], entry['width']
+            positions.append([y / H, x / W, (y + h) / H, (x + w) / W])
+        tiles = torch.stack(tiles, dim=0)
+        positions = torch.tensor(positions, dtype=torch.float32)
+
+        if self.augment:
+            params = _sample_geo_params(self.aug_flags)
+            glob = _apply_geo_tensor(glob, params)
+            tiles = torch.stack([_apply_geo_tensor(t, params) for t in tiles], dim=0)
+            positions = torch.stack([_apply_geo_pos(p, params) for p in positions], dim=0)
+
+        return glob, tiles, positions
