@@ -84,3 +84,5 @@
 - using full res for local reconstuction helped things, also switched to norm mse which helped blurry outputs
 - *it would be worth trying norm mse on the old ssl
 - doing sparse masking instead of huge patch removal, huge patches were causing noisy gradients for local because edges of the patch would appear as relevant morphology
+- sparse mask experiment, fixed the local issue, but leads me to beleive byol componenet is unneeded
+- should just use masked MAE for local reconstruction, there are too many global augmentations as-is
