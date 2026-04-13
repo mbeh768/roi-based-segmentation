@@ -63,7 +63,7 @@
       anything (resize handles it) but wastes capacity training features at a
       resolution they're never used at.
 
-- BYOL achieved 0.93 as opposed to 0.95 iou with old ssl
+- BYOL achieved 0.93 as opposed to 0.95 iou with old ssl [ notably with no augmentations, look at commit history to be sure]
     -catastrophically bad prediciton on first image: 21PControl-11-1of2
     - significant islands on AJKY121-9-1
     - slight islands on AJKV056-7
@@ -90,3 +90,6 @@
     - masked reconstruction with less agressive photometric augmentations on local only (no byol) would likely out perform this, although reconstruction grids look very good
         - paper uses 16x16 masking cells, i think 8x8 is more viable here because morphology is much more erratic than the imagenet case
         - would also be wise to not compute loss on provided patches, as the paper does
+        - * this acheived okay results, not the best so far but it is notable that it was able to overfit with augmentations at ~.9 iou which could be a record
+            - all in all a good sign
+- the issue is probably the crop size, but it is also likely the masking size, the original MAE paper uses 16x16, and i have halved that, but that is H/16, but on my crops it is H/2, way too much, reducing to crop_size/16 which equals 2 in my case
