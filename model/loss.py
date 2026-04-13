@@ -65,6 +65,20 @@ def l1(output, target):
     return F.l1_loss(output, target)
 
 
+def pixel_norm_mse(output, target, eps=1e-6):
+    """
+    MAE-style per-image normalised MSE: z-score both output and target along
+    (C, H, W) per sample, then MSE. Removes the "match the mean intensity"
+    shortcut that causes blurry reconstructions.
+    """
+    def _znorm(x):
+        dims = (1, 2, 3)
+        mean = x.mean(dim=dims, keepdim=True)
+        std = x.std(dim=dims, keepdim=True)
+        return (x - mean) / (std + eps)
+    return F.mse_loss(_znorm(output), _znorm(target))
+
+
 def dense_byol(z1, z2, t1, t2):
     """
     Symmetric per-pixel BYOL loss.

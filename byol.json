@@ -77,6 +77,7 @@
         "early_stop": 50,
 
         "tensorboard": true,
+        "local_loss": "pixel_norm_mse",
         "local_loss_weight": 1.0,
         "save_grid_period": 2,
         "save_grid_n": 12

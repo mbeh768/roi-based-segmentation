@@ -8,6 +8,7 @@ from torchvision.utils import make_grid
 from base import BaseTrainer
 import torch.nn.functional as F
 
+import model.loss as module_loss
 from model.loss import vicreg_features, dense_byol
 from utils import inf_loop, MetricTracker
 
@@ -323,6 +324,7 @@ class BYOLTrainer(BaseTrainer):
         self.base_momentum = self._unwrapped().momentum
         self.total_epochs = config['trainer']['epochs']
         self.local_loss_weight = config['trainer'].get('local_loss_weight', 1.0)
+        self.local_loss_fn = getattr(module_loss, config['trainer'].get('local_loss', 'mse'))
         self.save_grid_period = config['trainer'].get('save_grid_period', 0)
         self.save_grid_n = config['trainer'].get('save_grid_n', 12)
 
@@ -424,7 +426,7 @@ class BYOLTrainer(BaseTrainer):
             self.optimizer.zero_grad()
             z1, z2, t1, t2, local_recon, feat1 = self.model(v1, v2, pos, g1, g2)
             byol_loss = dense_byol(z1, z2, t1, t2)
-            local_loss = F.mse_loss(local_recon, local_target)
+            local_loss = self.local_loss_fn(local_recon, local_target)
             loss = byol_loss + self.local_loss_weight * local_loss
             loss.backward()
             self.optimizer.step()
@@ -477,7 +479,7 @@ class BYOLTrainer(BaseTrainer):
                 g2 = g2.to(self.device)
                 z1, z2, t1, t2, local_recon, feat1 = self.model(v1, v2, pos, g1, g2)
                 byol_loss = dense_byol(z1, z2, t1, t2)
-                local_loss = F.mse_loss(local_recon, local_target)
+                local_loss = self.local_loss_fn(local_recon, local_target)
                 loss = byol_loss + self.local_loss_weight * local_loss
                 self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.valid_metrics.update('loss', loss.item())
