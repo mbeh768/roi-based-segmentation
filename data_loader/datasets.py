@@ -361,10 +361,12 @@ class BYOLDataset(Dataset):
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.5,
                  p_intensity_invert=0.2,
+                 mask_ratio=0.0,
                  hflip=0.0, vflip=0.0, rot90=0.0):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.crop_size = crop_size
+        self.mask_ratio = mask_ratio
         self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
         self.augment = any(v > 0 for v in self.aug_flags.values())
 
@@ -374,6 +376,9 @@ class BYOLDataset(Dataset):
             T.RandomApply([T.GaussianBlur(kernel_size=blur_kernel, sigma=(0.1, 2.0))], p=p_blur),
             T.RandomApply([T.Lambda(lambda x: -x)], p=p_intensity_invert),
         ])
+        self.erase = (T.RandomErasing(p=1.0, scale=(mask_ratio * 0.5, mask_ratio),
+                                      ratio=(0.3, 3.3), value=0)
+                      if mask_ratio > 0 else None)
 
         self.items = []
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
@@ -403,6 +408,9 @@ class BYOLDataset(Dataset):
 
         v1 = self.photo_transform(glob.clone())
         v2 = self.photo_transform(glob.clone())
+        if self.erase is not None:
+            v1 = self.erase(v1)
+            v2 = self.erase(v2)
         local_target = F.interpolate(
             local.unsqueeze(0),
             size=(self.crop_size, self.crop_size),

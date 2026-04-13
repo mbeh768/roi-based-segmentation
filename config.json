@@ -1,5 +1,5 @@
 {
-    "name": "supervised_usingbyolglobal, no augs",
+    "name": "supervised_usingbyolglobal, with geo augs, higher lr",
     "n_gpu": 1,
 
     "arch": {
@@ -43,8 +43,8 @@
     "lr_scheduler": {
         "type": "CosineAnnealingLR",
         "args": {
-            "T_max": 682,
-            "eta_min": 1e-6
+            "T_max": 800,
+            "eta_min": 1e-5
         }
     },
     "preprocess": {
@@ -60,7 +60,7 @@
     },
 
     "trainer": {
-        "epochs": 400,
+        "epochs": 800,
 
         "save_dir": "saved/",
         "save_period": 25,

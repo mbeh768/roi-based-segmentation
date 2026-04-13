@@ -167,6 +167,7 @@ class BYOLDataLoader(BaseDataLoader):
                  blur_kernel=5,
                  p_noise=0.5, p_color=0.5, p_blur=0.5,
                  p_intensity_invert=0.2,
+                 mask_ratio=0.0,
                  hflip=0.0, vflip=0.0, rot90=0.0):
         self.dataset = BYOLDataset(
             data_dir, crop_size=crop_size,
@@ -174,6 +175,7 @@ class BYOLDataLoader(BaseDataLoader):
             blur_kernel=blur_kernel,
             p_noise=p_noise, p_color=p_color, p_blur=p_blur,
             p_intensity_invert=p_intensity_invert,
+            mask_ratio=mask_ratio,
             hflip=hflip, vflip=vflip, rot90=rot90,
         )
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)

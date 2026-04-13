@@ -76,4 +76,4 @@
     - loss decrease is also much noisier than the other model, around 10k iteratiors there was a massive decrease in iou, suggests that cosine decay lr would benefit this model and unstable gradients caused collapse
 - before removing the unneeded auxillary lost, this framework should be tested with augmentations to see if there is any difference
     - doing this with cosine decay lr, and no auxillary loss
-    - see exact config in git commit: 
+    - see exact config in git commit: fa6e8e7
