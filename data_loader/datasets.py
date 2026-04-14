@@ -325,11 +325,26 @@ class SSLGlobalLocalDataset(Dataset):
         """Apply random augmentations to a (C, H, W) tensor."""
         img = self.transform(img.clone())
         if self.mask_ratio > 0:
-            img = T.RandomErasing(
-                p=1.0, scale=(self.mask_ratio * 0.5, self.mask_ratio),
-                ratio=(0.3, 3.3), value=0
-            )(img)
+            img = self._sparse_mask(img)
         return img
+
+    def _sparse_mask(self, img):
+        """MAE-style sparse patch masking: zero `mask_ratio` fraction of
+        `mask_patch_size x mask_patch_size` blocks."""
+        _, H, W = img.shape
+        ps = self.mask_patch_size
+        gh, gw = H // ps, W // ps
+        n_patches = gh * gw
+        n_mask = int(round(n_patches * self.mask_ratio))
+        if n_mask == 0:
+            return img
+        noise = torch.rand(n_patches)
+        idx = noise.argsort()[:n_mask]
+        patch_mask = torch.ones(n_patches, dtype=img.dtype)
+        patch_mask[idx] = 0
+        patch_mask = patch_mask.view(1, gh, gw)
+        pixel_mask = patch_mask.repeat_interleave(ps, dim=-2).repeat_interleave(ps, dim=-1)
+        return img * pixel_mask
 
     def __getitem__(self, idx):
         patch_path, stem, entry = self.items[idx]

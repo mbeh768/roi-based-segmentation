@@ -104,4 +104,8 @@
 [04-14-2026]
 - was unable to replicate the success of old ssl, i think the strategy will be to implement sparse masking in that framework, running an expeirment to validate
 - * it would be very wise to only use the iou metric after epoch ~50
-- old ssl beat all new methods, deleting them
+- old ssl beat all new methods, deleting them...
+    - old ssl needed more epochs to overfit to augmentations! big step! this was notably trained with validation so that could factor into it
+        - failed on negative patch on one of the hearts i saw, im sure sparse masking can fix this
+    - still needs some improvement, we could get a stronger overfit for sure
+- going to try a sparse mask wiht 16x16 removal like MAE on global, reconstruction should still succeed even if crop is mostly deleted by masking

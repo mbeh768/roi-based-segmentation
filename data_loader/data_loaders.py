@@ -2,7 +2,7 @@ import numpy as np
 from collections import defaultdict
 from torch.utils.data.sampler import Sampler, SubsetRandomSampler
 from base import BaseDataLoader
-from data_loader.datasets import GlobalDataset, LocalDataset, LocalGlobalDataset, SSLGlobalLocalDataset, BYOLDataset, MAEDataset
+from data_loader.datasets import GlobalDataset, LocalDataset, LocalGlobalDataset, SSLGlobalLocalDataset
 
 
 class ForegroundBalancedSampler(Sampler):

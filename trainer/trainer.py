@@ -174,6 +174,8 @@ class SSLTrainer(BaseTrainer):
 
         self.local_loss_weight = config['trainer'].get('local_loss_weight', 1.0)
         self.feat_reg_weight = config['trainer'].get('feat_reg_weight', 0.1)
+        self.save_grid_period = config['trainer'].get('save_grid_period', 0)
+        self.save_grid_n = config['trainer'].get('save_grid_n', 12)
 
         self.train_metrics = MetricTracker(
             'loss', 'global_loss', 'local_loss', 'feat_reg',
@@ -252,9 +254,50 @@ class SSLTrainer(BaseTrainer):
             val_log = self._valid_epoch(epoch)
             log.update(**{'val_' + k: v for k, v in val_log.items()})
 
+        if self.save_grid_period > 0 and epoch % self.save_grid_period == 0:
+            self._save_grid(epoch)
+
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
         return log
+
+    def _save_grid(self, epoch):
+        loader = self.valid_data_loader if self.valid_data_loader is not None else self.data_loader
+        if loader is None:
+            return
+        out_dir = Path(self.checkpoint_dir) / 'ssl_grid'
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        self.model.eval()
+        rows = []
+        collected = 0
+        with torch.no_grad():
+            for aug_global, pos, clean_global, local_target in loader:
+                aug_global   = aug_global.to(self.device)
+                pos          = pos.to(self.device)
+                clean_global = clean_global.to(self.device)
+                local_target = local_target.to(self.device)
+                global_recon, local_recon, _ = self.model(aug_global, pos, local_target)
+                B = aug_global.shape[0]
+                for i in range(B):
+                    if collected >= self.save_grid_n:
+                        break
+                    panels = [
+                        BYOLTrainer._label(BYOLTrainer._to_img(aug_global[i]), 'aug_input'),
+                        BYOLTrainer._label(BYOLTrainer._draw_pos(BYOLTrainer._to_img(clean_global[i]), pos[i]), 'global_target'),
+                        BYOLTrainer._label(BYOLTrainer._to_img(global_recon[i]), 'global_recon'),
+                        BYOLTrainer._label(BYOLTrainer._to_img(local_target[i], interp=cv2.INTER_NEAREST), 'local_target'),
+                        BYOLTrainer._label(BYOLTrainer._to_img(local_recon[i], interp=cv2.INTER_NEAREST), 'local_recon'),
+                    ]
+                    rows.append(np.concatenate(panels, axis=1))
+                    collected += 1
+                if collected >= self.save_grid_n:
+                    break
+
+        if rows:
+            grid = np.concatenate(rows, axis=0)
+            cv2.imwrite(str(out_dir / f'grid_epoch{epoch}.png'), grid)
+            self.logger.info(f'Saved SSL grid ({collected} samples) for epoch {epoch}')
 
     def _valid_epoch(self, epoch):
         self.model.eval()

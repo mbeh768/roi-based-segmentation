@@ -1,5 +1,5 @@
 {
-    "name": "MAE global with minimask-longertrain pretrain, larger batch size",
+    "name": "bottleneckssl trained with global augs, and validation",
     "n_gpu": 1,
 
     "arch": {
@@ -9,7 +9,7 @@
             "in_ch": 1,
             "global_ch": 64,
             "bottleneck_dropout": 0.1,
-            "ssl_checkpoint": "saved/models/mae-minimask-longertraining/0413_212411/checkpoint-epoch400.pth"
+            "ssl_checkpoint": "saved/models/ssl-withgeo/0414_104523/checkpoint-epoch230.pth"
         }
     },
     "data_loader": {
