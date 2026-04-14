@@ -93,3 +93,5 @@
         - * this acheived okay results, not the best so far but it is notable that it was able to overfit with augmentations at ~.9 iou which could be a record
             - all in all a good sign
 - the issue is probably the crop size, but it is also likely the masking size, the original MAE paper uses 16x16, and i have halved that, but that is H/16, but on my crops it is H/2, way too much, reducing to crop_size/16 which equals 2 in my case
+    - * notable that the models trained only on reconstruction seem to struggle on features that are not actually present in morphology, i think this will have to be corrected with manual annotation
+    - may be wise to restrict all-foreground tiles as well, or tiles with low stdev

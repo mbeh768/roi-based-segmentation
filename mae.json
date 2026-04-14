@@ -1,5 +1,5 @@
 {
-    "name": "mae-inital implementation",
+    "name": "mae-minimask-longertraining",
     "n_gpu": 1,
 
     "arch": {
@@ -10,7 +10,7 @@
             "crop_size": 16,
             "local_size": 256,
             "target_multiplier": 2,
-            "mask_ratio": 0.5,
+            "mask_ratio": 0.2,
             "mask_patch_size": 2,
             "noise_std": 0.1,
             "color_scale_range": 0.15,
@@ -47,8 +47,8 @@
     "lr_scheduler": {
         "type": "CosineAnnealingLR",
         "args": {
-            "T_max": 60,
-            "eta_min": 1e-5
+            "T_max": 400,
+            "eta_min": 5e-6
         }
     },
 
@@ -66,7 +66,7 @@
     },
 
     "trainer": {
-        "epochs": 60,
+        "epochs": 400,
 
         "save_dir": "saved/",
         "save_period": 10,
