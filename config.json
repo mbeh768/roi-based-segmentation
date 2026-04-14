@@ -1,5 +1,5 @@
 {
-    "name": "MAE global with minimask-longertrain pretrain",
+    "name": "MAE global with minimask-longertrain pretrain, larger batch size",
     "n_gpu": 1,
 
     "arch": {
@@ -16,7 +16,7 @@
         "type": "LocalGlobalDataLoader",
         "args":{
             "data_dir": "data/[collapsed]64_tiles_per_image",
-            "batch_size": 20,
+            "batch_size": 40,
             "shuffle": true,
             "validation_split": 0.0,
             "num_workers": 0,
