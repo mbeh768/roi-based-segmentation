@@ -1,0 +1,75 @@
+{
+    "name": "BYOLoverfit",
+    "n_gpu": 1,
+
+    "arch": {
+        "type": "PretrainedLocalGlobalUNet",
+        "args": {
+            "num_classes": 1,
+            "in_ch": 1,
+            "global_ch": 64,
+            "bottleneck_dropout": 0.1,
+            "ssl_checkpoint": "saved/models/byol-full_res_local_normmse_sparse_masking/0413_104213/checkpoint-epoch30.pth"
+        }
+    },
+    "data_loader": {
+        "type": "LocalGlobalDataLoader",
+        "args":{
+            "data_dir": "data/[collapsed]64_tiles_per_image",
+            "batch_size": 40,
+            "shuffle": true,
+            "validation_split": 0.0,
+            "num_workers": 0,
+            "hflip": 0.0,
+            "vflip": 0.0,
+            "rot90": 0.0,
+            "visualize": "data/previews",
+            "fg_ratio": 0.0,
+            "fg_min": 0.05
+        }
+    },
+    "optimizer": {
+        "type": "Adam",
+        "args":{
+            "lr": 1e-4,
+            "weight_decay": 0,
+            "amsgrad": true
+        }
+    },
+    "loss": "bce_dice",
+    "metrics": [
+        "iou", "accuracy"
+    ],
+    "lr_scheduler": {
+        "type": "ConstantLR",
+        "args": {
+            "factor": 1.0,
+            "total_iters": 400
+        }
+    },
+    "preprocess": {
+        "raw_image_directory": "/media/max/2TBHDD/Max B_files_from Behfar_Shared folder/Segmentation_Project/RGB FULL - dataset/",
+        "global_downsample": 256,
+        "czi_max_px": 5000000000,
+        "tiling_size": 2048,
+        "tile_size": 256,
+        "stride": 256,
+        "standardize": true,
+        "imagenet_norm": false,
+        "collapse": true
+    },
+
+    "trainer": {
+        "epochs": 400,
+
+        "save_dir": "saved/",
+        "save_period": 25,
+        "verbosity": 2,
+
+        "monitor": "off",
+        "early_stop": 10000,
+
+        "tensorboard": true,
+        "aux_loss_weight": 0.0
+    }
+}

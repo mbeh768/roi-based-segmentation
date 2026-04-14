@@ -95,3 +95,11 @@
 - the issue is probably the crop size, but it is also likely the masking size, the original MAE paper uses 16x16, and i have halved that, but that is H/16, but on my crops it is H/2, way too much, reducing to crop_size/16 which equals 2 in my case
     - * notable that the models trained only on reconstruction seem to struggle on features that are not actually present in morphology, i think this will have to be corrected with manual annotation
     - may be wise to restrict all-foreground tiles as well, or tiles with low stdev
+- larger batch size (20->40) with MAE static global encoder did well to produce more stable loss curves
+    -this iou was about .86
+- it was at this point that i realized it is likely not a great comparison to compare "overfit" with augmentations, as this is sort of just un-validated training performance
+- ill do a final comparison (no augs) with BYOL vs old SSL vs MAE but i think the old ssl worked best, you need a global term to make features capture meaningful context, or else it just downsamples
+
+
+[04-14-2026]
+- was unable to replicate the success of old ssl, i think the strategy will be to implement sparse masking in that framework, running an expeirment to validate
