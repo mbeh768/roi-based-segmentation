@@ -103,3 +103,5 @@
 
 [04-14-2026]
 - was unable to replicate the success of old ssl, i think the strategy will be to implement sparse masking in that framework, running an expeirment to validate
+- * it would be very wise to only use the iou metric after epoch ~50
+- old ssl beat all new methods, deleting them
