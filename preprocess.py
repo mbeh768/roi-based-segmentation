@@ -111,8 +111,12 @@ class Preprocessor:
 
         return image                           # CHW original dtype
 
-    def _load_czi(self, path):
+    def _load_czi(self, path, scene_index=0):
         '''Load CZI image as CHW array, zoomed so pixel count doesn't exceed czi_max_px.
+
+        Args:
+            scene_index (int): index into czidoc.scenes_bounding_rectangle.
+                Defaults to 0; pass via --namescsv second column to pick a specific scene.
 
         Requires: pylibCZIrw  (pip install pylibCZIrw)
         '''
@@ -129,7 +133,16 @@ class Preprocessor:
                 zoom *= 0.5
             print(f"\tczi image dimensions: {H}x{W} ({H*W:.2e} px), {n_channels} channel(s), pyramid zoom: {zoom} -> {int(H*zoom)}x{int(W*zoom)} ({H*zoom*W*zoom:.2e} px)\n")
             scenes = list(czidoc.scenes_bounding_rectangle.keys())
-            scene = scenes[0] if scenes else None
+            if scenes:
+                if scene_index >= len(scenes):
+                    raise IndexError(
+                        f"{path.name}: scene_index {scene_index} out of range "
+                        f"({len(scenes)} scene(s) available)"
+                    )
+                scene = scenes[scene_index]
+                print(f"\tczi scene: index {scene_index} -> {scene} (of {len(scenes)})")
+            else:
+                scene = None
 
             # read each channel separately and stack — read() without
             # a plane coordinate defaults to C=0 only
@@ -149,7 +162,7 @@ class Preprocessor:
 
         return data                                        # CHW original dtype
 
-    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None, imagenet_norm=False):
+    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None, imagenet_norm=False, scene_index=0):
         '''
         Load an image or mask, resize to a square, normalize to float32 [0, 1],
         optionally standardize channels per-channel, zero-pad to square.
@@ -170,7 +183,7 @@ class Preprocessor:
         _target = target_size if target_size is not None else self.c['preprocess']['global_downsample']
 
         if suffix == '.czi':
-            image = self._load_czi(path)
+            image = self._load_czi(path, scene_index=scene_index)
         elif is_mask:
             image = self._load_tif_tifffile(path)
         else:
@@ -369,7 +382,9 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--config', default='config.json', type=str,
                         help='config file path (default: config.json)')
     parser.add_argument('--namescsv', default=None, type=str,
-                        help='optional CSV with a "name" column; only files whose stem matches will be processed')
+                        help='optional CSV with two whitespace-separated columns: filename and scene_index. '
+                             'Only files whose stem matches are processed. Scene index selects which CZI scene '
+                             'to load (0 by default). Duplicate stems with different scenes are both processed.')
     parser.add_argument('--nomask', action='store_true',
                         help='process images only, skip mask processing')
     parser.add_argument('--dry-run', action='store_true',
@@ -388,11 +403,25 @@ if __name__ == '__main__':
     setup_logging(tile_dir, log_config=str(log_config))
     logger = logging.getLogger('preprocess')
 
-    # name filter from CSV
+    # name filter + scene map from CSV
     names = None
+    scene_map = {}   # stem -> scene_idx (last wins on duplicate stems)
     if args.namescsv is not None:
         with open(args.namescsv) as f:
-            names = {Path(line.strip()).stem for line in f if line.strip()}
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = [p.strip() for p in line.split(',')]
+                stem = Path(parts[0]).stem
+                scene_idx = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+                if stem in scene_map and scene_map[stem] != scene_idx:
+                    logger.warning(
+                        f"duplicate stem '{stem}' in CSV with differing scene "
+                        f"({scene_map[stem]} -> {scene_idx}); last entry wins"
+                    )
+                scene_map[stem] = scene_idx
+        names = set(scene_map.keys())
         logger.info(f"name filter active: {len(names)} entries from {args.namescsv}")
 
     p = Preprocessor(config)
@@ -404,7 +433,8 @@ if __name__ == '__main__':
 
     for i, image_path in enumerate(image_paths):
         clean_stem = image_path.stem.replace('_image', '').replace('.ome', '')
-        logger.info(f"[{i+1}/{len(image_paths)}] {image_path.name}")
+        scene_idx = scene_map.get(clean_stem, 0)
+        logger.info(f"[{i+1}/{len(image_paths)}] {image_path.name} (scene {scene_idx})")
 
         mask_path = mask_paths[i] if not args.nomask else None
         if mask_path is not None:
@@ -418,7 +448,8 @@ if __name__ == '__main__':
         standardize = config['preprocess'].get('standardize', True)
         collapse = config['preprocess'].get('collapse', False)
         image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
-                                  standardize=standardize, imagenet_norm=imagenet_norm)
+                                  standardize=standardize, imagenet_norm=imagenet_norm,
+                                  scene_index=scene_idx)
         if collapse:
             image = p.collapse_channels(image)
         image_vis = p.save_global(image, clean_stem, 'images', dry_run=args.dry_run)
@@ -427,7 +458,8 @@ if __name__ == '__main__':
         mask_vis = None
         if mask_path is not None:
             logger.info(f"[WORKING]\tglobal mask...")
-            mask = p.load_and_format(mask_path, cv2.INTER_NEAREST, standardize=False, is_mask=True)
+            mask = p.load_and_format(mask_path, cv2.INTER_NEAREST, standardize=False, is_mask=True,
+                                     scene_index=scene_idx)
             mask_vis = p.save_global(mask, clean_stem, 'masks', dry_run=args.dry_run)
             logger.info(f"[COMPLETE]\tglobal mask  shape={mask.shape}")
 
@@ -452,7 +484,7 @@ if __name__ == '__main__':
         logger.info(f"[WORKING]\tlocal image tiles...")
         image_local = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
                                         target_size=tiling_size, standardize=standardize,
-                                        imagenet_norm=imagenet_norm)
+                                        imagenet_norm=imagenet_norm, scene_index=scene_idx)
         if collapse:
             image_local = p.collapse_channels(image_local)
         n = p.save_local(image_local, clean_stem, 'images', dry_run=args.dry_run)
@@ -462,7 +494,7 @@ if __name__ == '__main__':
             logger.info(f"[WORKING]\tlocal mask tiles...")
             mask_local = p.load_and_format(mask_path, cv2.INTER_NEAREST,
                                            standardize=False, is_mask=True,
-                                           target_size=tiling_size)
+                                           target_size=tiling_size, scene_index=scene_idx)
             n = p.save_local(mask_local, clean_stem, 'masks', dry_run=args.dry_run)
             logger.info(f"[COMPLETE]\tlocal mask  {n} patches")
 

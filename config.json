@@ -1,5 +1,5 @@
 {
-    "name": "[overfit to augs]static global, sparse masking, 0.1valduringglobaltraining",
+    "name": "[overfit to augs]bottleneckssl, pixle_norm_mse",
     "n_gpu": 1,
 
     "arch": {
@@ -9,7 +9,7 @@
             "in_ch": 1,
             "global_ch": 64,
             "bottleneck_dropout": 0.1,
-            "ssl_checkpoint": "saved/models/bottleneckssl, normal masks, weaker photometrics-0.1validation/0415_003939/model_best.pth"
+            "ssl_checkpoint": "saved/models/bottleneckssl, pixel_norm_mse, -0.1validation/0415_095038/model_best.pth"
         }
     },
     "data_loader": {

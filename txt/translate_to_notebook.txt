@@ -102,10 +102,10 @@
 
 
 [04-14-2026]
-- was unable to replicate the success of old ssl, i think the strategy will be to implement sparse masking in that framework, running an expeirment to validate
+- was unable to replicate the success of old ssl with other methods, i think the strategy will be to implement sparse masking in that framework, running an expeirment to validate
 - * it would be very wise to only use the iou metric after epoch ~50
 - old ssl beat all new methods, deleting them...
-    - old ssl needed more epochs to overfit to augmentations! big step! this was notably trained with validation so that could factor into it
+    - old ssl with geometric augmentations just needed more epochs to overfit compared to the successful bottleneckssl
         - failed on negative patch on one of the hearts i saw, im sure sparse masking can fix this
         - still struggles on non-morphology-based segmentation, this is acceptable but we aspire to improve
     - still needs some improvement, we could get a stronger overfit for sure
@@ -113,9 +113,18 @@
     - * sparse mask performed worse than large masks
 - * strongest overfit by far is when ssl is trained with no geometric augmentations and large masks
 
-[EXPERIMENTS TO RUN] 
+[EXPERIMENTS TO RUN] - goal, improve overfit performance past reconstruction-based ssl with no augmentations during training and significant photometrics
 ssl - evaluate based on supervised overfit
-    - do not compute loss on unmasked tiles for ssl 
-    - use norm mse instead of mse
-    - less photometrics, right now it is absurd
     - remove non-ventricle images that slipped through the cracks
+        - had to redo preprocess for this, will do a standard bottleneck ssl training run prior to testing to ensure it didnt break anything
+    - do not compute loss on unmasked tiles for ssl 
+        - only reconstruct local based on reconstructed global regions
+            - reconstruct all local tiles per global, then backprop
+    - deeper global encoder
+    - regularization of features in different places
+
+    --- failures ---
+    X use norm mse instead of mse 
+        - weaker overfit
+    X less photometrics intensity
+    

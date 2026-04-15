@@ -1,5 +1,5 @@
 {
-    "name": "bottleneckssl, pixel_norm_loss, -0.1validation",
+    "name": "bottleneckssl, pixel_norm_mse, -0.1validation",
     "n_gpu": 1,
 
     "arch": {

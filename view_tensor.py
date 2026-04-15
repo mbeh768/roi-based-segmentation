@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import sys
 from pathlib import Path
 
-path = sys.argv[1] if len(sys.argv) > 1 else "data/ssl/images/17P391_7B/patch_0768_1536.pt"
+path = sys.argv[1] if len(sys.argv) > 1 else "/media/max/500GBSSD/machine_learning_projects/Mayo/att_vent_seg/data/ssl/images/25P48-2/global.pt"
 t = torch.load(path, weights_only=True)
 
 print(f"Path:  {path}")
