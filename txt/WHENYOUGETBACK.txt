@@ -1,0 +1,4 @@
+experiments ran:
+
+weaker photometric augmentations ssl && supervised using that as static global encoder
+view them both the configs reflect what has been done

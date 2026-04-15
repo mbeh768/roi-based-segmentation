@@ -118,3 +118,4 @@ ssl - evaluate based on supervised overfit
     - do not compute loss on unmasked tiles for ssl 
     - use norm mse instead of mse
     - less photometrics, right now it is absurd
+    - remove non-ventricle images that slipped through the cracks

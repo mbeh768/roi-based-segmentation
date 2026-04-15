@@ -9,7 +9,7 @@
             "in_ch": 1,
             "global_ch": 64,
             "bottleneck_dropout": 0.1,
-            "ssl_checkpoint": "saved/models/bottleneckssl, sparse masks-0.1validation/0414_185418/checkpoint-epoch150.pth"
+            "ssl_checkpoint": "saved/models/bottleneckssl, normal masks, weaker photometrics-0.1validation/0415_003939/model_best.pth"
         }
     },
     "data_loader": {
