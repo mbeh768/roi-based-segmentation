@@ -98,6 +98,95 @@ class BaseTrainer:
             if epoch % self.save_period == 0:
                 self._save_checkpoint(epoch, save_best=best)
 
+        self._save_epoch_plots()
+
+    def _save_epoch_plots(self):
+        """Parse info.log for per-epoch metrics and save one PNG per base metric.
+        Train and val lines of the same metric share a graph. Y-limits: loss [0, 1.5], iou [0, 1]."""
+        import re
+        from pathlib import Path
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.logger.warning('matplotlib not installed; skipping epoch plots')
+            return
+
+        log_dir = Path(self.config.log_dir)
+        log_path = log_dir / 'info.log'
+        if not log_path.exists():
+            self.logger.warning(f'info.log not found at {log_path}; skipping epoch plots')
+            return
+
+        # block parser: lines like "... - INFO -     key            : value"
+        kv_re = re.compile(r'-\s*INFO\s*-\s*(\S+)\s*:\s*([-+0-9.eE]+)\s*$')
+        epochs = []             # list of {key: float}
+        current = None
+        with open(log_path) as f:
+            for line in f:
+                m = kv_re.search(line)
+                if not m:
+                    continue
+                key, val = m.group(1), m.group(2)
+                try:
+                    val = float(val)
+                except ValueError:
+                    continue
+                if key == 'epoch':
+                    current = {'epoch': int(val)}
+                    epochs.append(current)
+                elif current is not None:
+                    current[key] = val
+
+        if not epochs:
+            self.logger.warning('no epoch blocks parsed from info.log; skipping plots')
+            return
+
+        # discover base metrics: any key seen (without val_ prefix)
+        keys = set()
+        for e in epochs:
+            keys.update(e.keys())
+        keys.discard('epoch')
+        bases = {k[4:] if k.startswith('val_') else k for k in keys}
+
+        ylim_for = lambda name: (
+            (0, 1.5) if 'loss' in name else
+            (0, 1) if 'iou' in name else
+            None
+        )
+
+        for base in sorted(bases):
+            xs_train, ys_train = [], []
+            xs_val, ys_val = [], []
+            for e in epochs:
+                ep = e['epoch']
+                if base in e:
+                    xs_train.append(ep); ys_train.append(e[base])
+                if f'val_{base}' in e:
+                    xs_val.append(ep); ys_val.append(e[f'val_{base}'])
+            if not xs_train and not xs_val:
+                continue
+
+            fig, ax = plt.subplots(figsize=(8, 4.5))
+            if xs_train:
+                ax.plot(xs_train, ys_train, label='train', color='tab:blue')
+            if xs_val:
+                ax.plot(xs_val, ys_val, label='val', color='tab:orange')
+            ax.set_xlabel('epoch')
+            ax.set_ylabel(base)
+            ax.set_title(base)
+            lim = ylim_for(base)
+            if lim is not None:
+                ax.set_ylim(*lim)
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            out = log_dir / f'{base}.png'
+            fig.tight_layout()
+            fig.savefig(out, dpi=100)
+            plt.close(fig)
+            self.logger.info(f'saved plot: {out}')
+
     def _save_checkpoint(self, epoch, save_best=False):
         """
         Saving checkpoints
