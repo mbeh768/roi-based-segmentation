@@ -107,5 +107,14 @@
 - old ssl beat all new methods, deleting them...
     - old ssl needed more epochs to overfit to augmentations! big step! this was notably trained with validation so that could factor into it
         - failed on negative patch on one of the hearts i saw, im sure sparse masking can fix this
+        - still struggles on non-morphology-based segmentation, this is acceptable but we aspire to improve
     - still needs some improvement, we could get a stronger overfit for sure
 - going to try a sparse mask wiht 16x16 removal like MAE on global, reconstruction should still succeed even if crop is mostly deleted by masking
+    - * sparse mask performed worse than large masks
+- * strongest overfit by far is when ssl is trained with no geometric augmentations and large masks
+
+[EXPERIMENTS TO RUN] 
+ssl - evaluate based on supervised overfit
+    - do not compute loss on unmasked tiles for ssl 
+    - use norm mse instead of mse
+    - less photometrics, right now it is absurd

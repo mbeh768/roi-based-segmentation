@@ -1,5 +1,5 @@
 {
-    "name": "bottleneckssl trained with global augs, and validation",
+    "name": "[overfit to augs]static global, sparse masking, 0.1valduringglobaltraining",
     "n_gpu": 1,
 
     "arch": {
@@ -9,7 +9,7 @@
             "in_ch": 1,
             "global_ch": 64,
             "bottleneck_dropout": 0.1,
-            "ssl_checkpoint": "saved/models/ssl-withgeo/0414_104523/checkpoint-epoch230.pth"
+            "ssl_checkpoint": "saved/models/bottleneckssl, sparse masks-0.1validation/0414_185418/checkpoint-epoch150.pth"
         }
     },
     "data_loader": {
