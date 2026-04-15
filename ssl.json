@@ -1,5 +1,5 @@
 {
-    "name": "bottleneckssl, normal masks, weaker photometrics-0.1validation",
+    "name": "bottleneckssl, pixel_norm_loss, -0.1validation",
     "n_gpu": 1,
 
     "arch": {
@@ -34,7 +34,7 @@
             "amsgrad": true
         }
     },
-    "loss": "mse",
+    "loss": "pixel_norm_mse",
     "metrics": [
         "psnr"
     ],
