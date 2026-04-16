@@ -7,7 +7,7 @@ import torch
 from base import BaseTrainer
 import torch.nn.functional as F
 
-from model.loss import vicreg_features
+from model.loss import vicreg_features, masked_mse
 from utils import inf_loop, MetricTracker
 
 
@@ -172,6 +172,7 @@ class SSLTrainer(BaseTrainer):
         self.feat_reg_weight = config['trainer'].get('feat_reg_weight', 0.1)
         self.save_grid_period = config['trainer'].get('save_grid_period', 0)
         self.save_grid_n = config['trainer'].get('save_grid_n', 12)
+        self.only_masked_global_loss = config['trainer'].get('only_masked_global_loss', False)
 
         self.train_metrics = MetricTracker(
             'loss', 'global_loss', 'local_loss', 'feat_reg',
@@ -196,7 +197,7 @@ class SSLTrainer(BaseTrainer):
         self.model.train()
         self.train_metrics.reset()
 
-        for batch_idx, (aug_global, pos, clean_global, local_target) in enumerate(self.data_loader):
+        for batch_idx, (aug_global, pos, clean_global, local_target, erase_mask) in enumerate(self.data_loader):
             aug_global   = aug_global.to(self.device)
             pos          = pos.to(self.device)
             clean_global = clean_global.to(self.device)
@@ -205,7 +206,10 @@ class SSLTrainer(BaseTrainer):
             self.optimizer.zero_grad()
             global_recon, local_recon, feat = self.model(aug_global, pos, local_target)
 
-            global_loss = self.criterion(global_recon, clean_global)
+            if self.only_masked_global_loss:
+                global_loss = masked_mse(global_recon, clean_global, erase_mask.to(self.device))
+            else:
+                global_loss = self.criterion(global_recon, clean_global)
             local_loss  = self.criterion(local_recon, local_target)
             feat_reg    = vicreg_features(feat)
             loss = (global_loss
@@ -283,7 +287,7 @@ class SSLTrainer(BaseTrainer):
         rows = []
         collected = 0
         with torch.no_grad():
-            for aug_global, pos, clean_global, local_target in loader:
+            for aug_global, pos, clean_global, local_target, _erase_mask in loader:
                 aug_global   = aug_global.to(self.device)
                 pos          = pos.to(self.device)
                 clean_global = clean_global.to(self.device)
@@ -314,7 +318,7 @@ class SSLTrainer(BaseTrainer):
         self.model.eval()
         self.valid_metrics.reset()
         with torch.no_grad():
-            for batch_idx, (aug_global, pos, clean_global, local_target) in enumerate(self.valid_data_loader):
+            for batch_idx, (aug_global, pos, clean_global, local_target, erase_mask) in enumerate(self.valid_data_loader):
                 aug_global   = aug_global.to(self.device)
                 pos          = pos.to(self.device)
                 clean_global = clean_global.to(self.device)
@@ -322,7 +326,10 @@ class SSLTrainer(BaseTrainer):
 
                 global_recon, local_recon, feat = self.model(aug_global, pos, local_target)
 
-                global_loss = self.criterion(global_recon, clean_global)
+                if self.only_masked_global_loss:
+                    global_loss = masked_mse(global_recon, clean_global, erase_mask.to(self.device))
+                else:
+                    global_loss = self.criterion(global_recon, clean_global)
                 local_loss  = self.criterion(local_recon, local_target)
                 feat_reg    = vicreg_features(feat)
                 loss = (global_loss

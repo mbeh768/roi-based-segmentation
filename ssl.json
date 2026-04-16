@@ -34,7 +34,7 @@
             "amsgrad": true
         }
     },
-    "loss": "pixel_norm_mse",
+    "loss": "mse",
     "metrics": [
         "psnr"
     ],
@@ -73,6 +73,7 @@
         "local_loss_weight": 1.0,
         "feat_reg_weight": 0.1,
         "save_grid_period": 10,
-        "save_grid_n": 12
+        "save_grid_n": 12,
+        "only_masked_global_loss": true
     }
 }

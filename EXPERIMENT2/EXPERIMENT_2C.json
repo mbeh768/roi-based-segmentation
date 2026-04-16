@@ -1,0 +1,64 @@
+{
+    "name": "EXPERIMENT 2C",
+    "n_gpu": 1,
+
+    "arch": {
+        "type": "PretrainedLocalGlobalUNet",
+        "args": {
+            "num_classes": 1,
+            "in_ch": 1,
+            "global_ch": 64,
+            "bottleneck_dropout": 0.1,
+            "ssl_checkpoint": "saved/models/PROCESS 2A/model_best.pth"
+        }
+    },
+    "data_loader": {
+        "type": "LocalGlobalDataLoader",
+        "args":{
+            "data_dir": "data/[collapsed]64_tiles_per_image",
+            "batch_size": 40,
+            "shuffle": true,
+            "validation_split": 0.0,
+            "num_workers": 0,
+            "hflip": 0.0,
+            "vflip": 0.0,
+            "rot90": 0.0,
+            "visualize": "data/previews",
+            "fg_ratio": 0.3,
+            "fg_min": 0.05
+        }
+    },
+    "optimizer": {
+        "type": "Adam",
+        "args":{
+            "lr": 1e-4,
+            "weight_decay": 0,
+            "amsgrad": true
+        }
+    },
+    "loss": "bce_dice",
+    "metrics": [
+        "iou", "accuracy"
+    ],
+    "lr_scheduler": {
+        "type": "CosineAnnealingLR",
+        "args": {
+            "T_max": 800,
+            "eta_min": 1e-5
+        }
+    },
+
+    "trainer": {
+        "epochs": 800,
+
+        "save_dir": "saved/",
+        "save_period": 25,
+        "verbosity": 2,
+
+        "monitor": "min val_loss",
+        "early_stop": 100,
+
+        "tensorboard": true,
+        "aux_loss_weight": 0.0
+    }
+}

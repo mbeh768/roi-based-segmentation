@@ -322,14 +322,25 @@ class SSLGlobalLocalDataset(Dataset):
         return len(self.items)
 
     def _augment(self, img):
-        """Apply random augmentations to a (C, H, W) tensor."""
+        """Apply photometric augs + random rectangular erase to a (C, H, W) tensor.
+        Returns (augmented, erase_mask) where erase_mask is (1, H, W) float in {0, 1}."""
         img = self.transform(img.clone())
+        _, h, w = img.shape
+        erase_mask = torch.zeros(1, h, w, dtype=torch.float32)
         if self.mask_ratio > 0:
-            img = T.RandomErasing(
-                p=1.0, scale=(self.mask_ratio * 0.5, self.mask_ratio),
-                ratio=(0.3, 3.3), value=0
-            )(img)
-        return img
+            area = h * w
+            for _ in range(10):
+                target_area = random.uniform(self.mask_ratio * 0.5, self.mask_ratio) * area
+                aspect_ratio = random.uniform(0.3, 3.3)
+                eh = int(round((target_area * aspect_ratio) ** 0.5))
+                ew = int(round((target_area / aspect_ratio) ** 0.5))
+                if 0 < eh < h and 0 < ew < w:
+                    y0 = random.randint(0, h - eh)
+                    x0 = random.randint(0, w - ew)
+                    img[:, y0:y0 + eh, x0:x0 + ew] = 0.0
+                    erase_mask[:, y0:y0 + eh, x0:x0 + ew] = 1.0
+                    break
+        return img, erase_mask
 
     def __getitem__(self, idx):
         patch_path, stem, entry = self.items[idx]
@@ -347,7 +358,7 @@ class SSLGlobalLocalDataset(Dataset):
                 clean_global, local_tile, pos=pos, flags=self.aug_flags,
             )
 
-        aug_global = self._augment(clean_global)
+        aug_global, erase_mask = self._augment(clean_global)
 
         local_target = F.interpolate(
             local_tile.unsqueeze(0),
@@ -355,5 +366,5 @@ class SSLGlobalLocalDataset(Dataset):
             mode='bilinear', align_corners=True,
         ).squeeze(0)   # (3, crop_size, crop_size)
 
-        return aug_global, pos, clean_global, local_target
+        return aug_global, pos, clean_global, local_target, erase_mask
 

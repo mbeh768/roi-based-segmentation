@@ -32,6 +32,18 @@ def mse(output, target):
     return F.mse_loss(output, target)
 
 
+def masked_mse(output, target, mask):
+    """MSE restricted to pixels where mask > 0.
+    mask: (B, 1, H, W) float {0, 1}, broadcasts across channels.
+    Falls back to plain MSE when mask is empty."""
+    diff = (output - target) ** 2
+    mask_bchw = mask.expand_as(diff).to(diff.dtype)
+    denom = mask_bchw.sum()
+    if denom < 1.0:
+        return diff.mean()
+    return (diff * mask_bchw).sum() / denom
+
+
 def vicreg_features(feat, var_weight=1.0, cov_weight=0.04):
     """
     VICReg-style variance + covariance regularization on feature maps.

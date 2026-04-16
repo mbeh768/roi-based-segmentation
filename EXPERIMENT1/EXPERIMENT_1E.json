@@ -9,7 +9,7 @@
             "in_ch": 1,
             "global_ch": 64,
             "bottleneck_dropout": 0.1,
-            "ssl_checkpoint": "saved/models/PROCESS 2A/model_best.pth"
+            "ssl_checkpoint": "saved/models/PROCESS 1B/model_best.pth"
         }
     },
     "data_loader": {
