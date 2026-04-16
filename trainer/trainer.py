@@ -7,7 +7,7 @@ import torch
 from base import BaseTrainer
 import torch.nn.functional as F
 
-from model.loss import vicreg_features, masked_mse
+from model.loss import vicreg_features, weighted_mask_mse
 from utils import inf_loop, MetricTracker
 
 
@@ -172,7 +172,7 @@ class SSLTrainer(BaseTrainer):
         self.feat_reg_weight = config['trainer'].get('feat_reg_weight', 0.1)
         self.save_grid_period = config['trainer'].get('save_grid_period', 0)
         self.save_grid_n = config['trainer'].get('save_grid_n', 12)
-        self.only_masked_global_loss = config['trainer'].get('only_masked_global_loss', False)
+        self.global_mask_loss_weight = config['trainer'].get('global_mask_loss_weight', 1.0)
 
         self.train_metrics = MetricTracker(
             'loss', 'global_loss', 'local_loss', 'feat_reg',
@@ -206,8 +206,8 @@ class SSLTrainer(BaseTrainer):
             self.optimizer.zero_grad()
             global_recon, local_recon, feat = self.model(aug_global, pos, local_target)
 
-            if self.only_masked_global_loss:
-                global_loss = masked_mse(global_recon, clean_global, erase_mask.to(self.device))
+            if self.global_mask_loss_weight != 1.0:
+                global_loss = weighted_mask_mse(global_recon, clean_global, erase_mask.to(self.device), self.global_mask_loss_weight)
             else:
                 global_loss = self.criterion(global_recon, clean_global)
             local_loss  = self.criterion(local_recon, local_target)
@@ -326,8 +326,8 @@ class SSLTrainer(BaseTrainer):
 
                 global_recon, local_recon, feat = self.model(aug_global, pos, local_target)
 
-                if self.only_masked_global_loss:
-                    global_loss = masked_mse(global_recon, clean_global, erase_mask.to(self.device))
+                if self.global_mask_loss_weight != 1.0:
+                    global_loss = weighted_mask_mse(global_recon, clean_global, erase_mask.to(self.device), self.global_mask_loss_weight)
                 else:
                     global_loss = self.criterion(global_recon, clean_global)
                 local_loss  = self.criterion(local_recon, local_target)

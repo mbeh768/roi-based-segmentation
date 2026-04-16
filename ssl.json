@@ -74,6 +74,6 @@
         "feat_reg_weight": 0.1,
         "save_grid_period": 10,
         "save_grid_n": 12,
-        "only_masked_global_loss": true
+        "global_mask_loss_weight": 3.0
     }
 }

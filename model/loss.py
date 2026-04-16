@@ -32,16 +32,14 @@ def mse(output, target):
     return F.mse_loss(output, target)
 
 
-def masked_mse(output, target, mask):
-    """MSE restricted to pixels where mask > 0.
-    mask: (B, 1, H, W) float {0, 1}, broadcasts across channels.
-    Falls back to plain MSE when mask is empty."""
+def weighted_mask_mse(output, target, mask, weight):
+    """MSE where masked pixels are weighted more heavily.
+    weight=1: masked pixels count the same as unmasked (plain MSE).
+    weight=3: masked pixels contribute 3x more to the loss.
+    mask: (B, 1, H, W) float {0, 1}, broadcasts across channels."""
     diff = (output - target) ** 2
-    mask_bchw = mask.expand_as(diff).to(diff.dtype)
-    denom = mask_bchw.sum()
-    if denom < 1.0:
-        return diff.mean()
-    return (diff * mask_bchw).sum() / denom
+    w = 1.0 + (weight - 1.0) * mask.expand_as(diff).to(diff.dtype)
+    return (diff * w).sum() / w.sum()
 
 
 def vicreg_features(feat, var_weight=1.0, cov_weight=0.04):
