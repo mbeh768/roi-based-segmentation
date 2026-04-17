@@ -89,7 +89,7 @@ NOTE: testing higher weights on reconstruction would be beneficial, did not test
 [EXPERIMENT 3] - robust local supervision
 instead of a single local crop per image, lets do 4
 
-    [PROCESS 3A] - train SSL identically to [PROCESS 1B] with a batch size of 10 instead of 60
+    [PROCESS 3A] - train SSL identically to [PROCESS 1B] with a batch size of 45 instead of 60
     (this is to control for a smaller batch size due to computation requriements)
 
     NOTE: changed some nuance of the tile sampling too, now local selection is explicitly randomized instead of tied to the index (which was random due to pytorch shuffle anyways)
