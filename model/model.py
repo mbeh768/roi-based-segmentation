@@ -216,10 +216,13 @@ class SSLGlobalUNet(BaseModel):
 
     def forward(self, aug_global, pos, local_target):
         feat = self.unet(aug_global)                                    # (B, out_ch, H, W)
-        global_recon = self.global_head(feat)                           # (B, 3, H, W)
+        global_recon = self.global_head(feat)                           # (B, in_ch, H, W)
         cs = local_target.shape[-1]
-        local_feat = _crop_and_resize(feat, pos, cs, cs)               # (B, out_ch, cs, cs)
-        local_recon  = self.local_head(local_feat)                      # (B, 3, cs, cs)
+        B, N = pos.shape[:2]                                            # pos: (B, N, 4)
+        feat_exp = feat.repeat_interleave(N, dim=0)                    # (B*N, out_ch, H, W)
+        local_feat = _crop_and_resize(feat_exp, pos.reshape(B * N, 4), cs, cs)  # (B*N, out_ch, cs, cs)
+        local_recon = self.local_head(local_feat)                       # (B*N, in_ch, cs, cs)
+        local_recon = local_recon.reshape(B, N, *local_recon.shape[1:]) # (B, N, in_ch, cs, cs)
         return global_recon, local_recon, feat
 
 

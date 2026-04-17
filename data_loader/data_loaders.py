@@ -122,7 +122,8 @@ class SSLGlobalLocalDataLoader(BaseDataLoader):
                  p_noise=0.5, p_color=0.5, p_blur=0.3,
                  mask_ratio=0.0, mask_patch_size=16,
                  p_intensity_invert=0.0,
-                 hflip=0.0, vflip=0.0, rot90=0.0):
+                 hflip=0.0, vflip=0.0, rot90=0.0,
+                 num_local_crops=1):
         self.dataset = SSLGlobalLocalDataset(
             data_dir, crop_size=crop_size,
             noise_std=noise_std, color_scale_range=color_scale_range,
@@ -131,6 +132,7 @@ class SSLGlobalLocalDataLoader(BaseDataLoader):
             mask_ratio=mask_ratio, mask_patch_size=mask_patch_size,
             p_intensity_invert=p_intensity_invert,
             hflip=hflip, vflip=vflip, rot90=rot90,
+            num_local_crops=num_local_crops,
         )
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 

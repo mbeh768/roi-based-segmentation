@@ -277,11 +277,12 @@ class SSLGlobalLocalDataset(Dataset):
     """
     Self-supervised dataset for pretraining _GlobalUNet.
 
-    Returns (aug_global, pos, clean_global, local_target) where:
-        aug_global:   (3, H, W) augmented global image (model input)
-        pos:          (4,) normalised tile region [y0, x0, y1, x1]
-        clean_global: (3, H, W) original global image (global reconstruction target)
-        local_target: (3, crop_size, crop_size) downsampled local tile (local reconstruction target)
+    Returns (aug_global, pos, clean_global, local_target_stack, erase_mask) where:
+        aug_global:         (C, H, W) augmented global image (model input)
+        pos:                (N, 4) normalised tile regions [y0, x0, y1, x1] for N crops
+        clean_global:       (C, H, W) original global image (global reconstruction target)
+        local_target_stack: (N, C, crop_size, crop_size) downsampled local tiles
+        erase_mask:         (1, H, W) binary mask of erased region
 
     No masks needed -- works with --nomask preprocessed data.
     """
@@ -291,10 +292,12 @@ class SSLGlobalLocalDataset(Dataset):
                  p_noise=0.5, p_color=0.5, p_blur=0.3,
                  mask_ratio=0.0, mask_patch_size=16,
                  p_intensity_invert=0.0,
-                 hflip=0.0, vflip=0.0, rot90=0.0):
+                 hflip=0.0, vflip=0.0, rot90=0.0,
+                 num_local_crops=1):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.crop_size = crop_size
+        self.num_local_crops = num_local_crops
         self.mask_ratio = mask_ratio
         self.mask_patch_size = mask_patch_size
         self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
@@ -308,13 +311,18 @@ class SSLGlobalLocalDataset(Dataset):
         ])
 
         self.items = []
+        self.stem_to_items = {}
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
             stem = coords_file.parent.name
             with open(coords_file) as f:
                 entries = json.load(f)
+            stem_items = []
             for entry in entries:
                 patch_path = coords_file.parent / entry['filename']
-                self.items.append((patch_path, stem, entry))
+                item = (patch_path, stem, entry)
+                self.items.append(item)
+                stem_items.append(item)
+            self.stem_to_items[stem] = stem_items
 
         assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
 
@@ -343,28 +351,46 @@ class SSLGlobalLocalDataset(Dataset):
         return img, erase_mask
 
     def __getitem__(self, idx):
-        patch_path, stem, entry = self.items[idx]
+        _, stem, _ = self.items[idx]
 
         clean_global = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
-        local_tile = torch.load(patch_path, weights_only=True)   # (3, 256, 256)
 
-        H, W = entry['image_H'], entry['image_W']
-        y, x = entry['y'], entry['x']
-        h, w = entry['height'], entry['width']
-        pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
-
+        # Sample one set of geo params and apply to the global image; the same
+        # transform is applied to every local tile so positions stay consistent.
+        geo_params = _sample_geo_params(self.aug_flags) if self.augment else (0, 0, 0)
         if self.augment:
-            clean_global, local_tile, pos = _geo_augment(
-                clean_global, local_tile, pos=pos, flags=self.aug_flags,
-            )
+            clean_global = _apply_geo_tensor(clean_global, geo_params)
 
         aug_global, erase_mask = self._augment(clean_global)
 
-        local_target = F.interpolate(
-            local_tile.unsqueeze(0),
-            size=(self.crop_size, self.crop_size),
-            mode='bilinear', align_corners=True,
-        ).squeeze(0)   # (3, crop_size, crop_size)
+        # Randomly sample num_local_crops tiles from this stem (with replacement so
+        # small stems are handled gracefully).
+        sampled = random.choices(self.stem_to_items[stem], k=self.num_local_crops)
 
-        return aug_global, pos, clean_global, local_target, erase_mask
+        pos_list = []
+        local_target_list = []
+        for sp_path, _, sp_entry in sampled:
+            local_tile = torch.load(sp_path, weights_only=True)
+            H, W = sp_entry['image_H'], sp_entry['image_W']
+            y, x = sp_entry['y'], sp_entry['x']
+            h, w = sp_entry['height'], sp_entry['width']
+            pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
+
+            if self.augment:
+                local_tile = _apply_geo_tensor(local_tile, geo_params)
+                pos = _apply_geo_pos(pos, geo_params)
+
+            local_target = F.interpolate(
+                local_tile.unsqueeze(0),
+                size=(self.crop_size, self.crop_size),
+                mode='bilinear', align_corners=True,
+            ).squeeze(0)
+
+            pos_list.append(pos)
+            local_target_list.append(local_target)
+
+        pos_stack = torch.stack(pos_list)             # (N, 4)
+        local_target_stack = torch.stack(local_target_list)  # (N, C, cs, cs)
+
+        return aug_global, pos_stack, clean_global, local_target_stack, erase_mask
 

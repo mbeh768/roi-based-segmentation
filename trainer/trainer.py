@@ -297,13 +297,17 @@ class SSLTrainer(BaseTrainer):
                 for i in range(B):
                     if collected >= self.save_grid_n:
                         break
+                    glob_vis = self._to_img(clean_global[i])
+                    for n in range(pos.shape[1]):
+                        glob_vis = self._draw_pos(glob_vis, pos[i][n])
                     panels = [
                         self._label(self._to_img(aug_global[i]), 'aug_input'),
-                        self._label(self._draw_pos(self._to_img(clean_global[i]), pos[i]), 'global_target'),
+                        self._label(glob_vis, 'global_target'),
                         self._label(self._to_img(global_recon[i]), 'global_recon'),
-                        self._label(self._to_img(local_target[i], interp=cv2.INTER_NEAREST), 'local_target'),
-                        self._label(self._to_img(local_recon[i], interp=cv2.INTER_NEAREST), 'local_recon'),
                     ]
+                    for n in range(local_target.shape[1]):
+                        panels.append(self._label(self._to_img(local_target[i][n], interp=cv2.INTER_NEAREST), f'local_t{n}'))
+                        panels.append(self._label(self._to_img(local_recon[i][n], interp=cv2.INTER_NEAREST), f'local_r{n}'))
                     rows.append(np.concatenate(panels, axis=1))
                     collected += 1
                 if collected >= self.save_grid_n:
