@@ -110,7 +110,8 @@ instead of a single local crop per image, lets do 4
 
     Expected: superior performance to all previous experiments, especially in false positives, this is because features will be strongly enforced to be local in a variety of locations
     per backprop in global encoder training
-    Results: no perceptible difference compared to [EXPERIMENT 3C]
+    Results: no perceptible difference compared to [EXPERIMENT 3C], looking back, this is because of parameter sharing in convolution, supervising feature extraction in a single
+    region is equivalent because that single region shares parameters with every other local crop at the global level, all we get is slightly better gradient stability
 
 
 
