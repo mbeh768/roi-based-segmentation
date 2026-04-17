@@ -134,6 +134,7 @@ instead of a single local crop per image, lets do 4
 
 
     [EXPERIMENT 4C] - learnable resnet18
+    trained identically to [EXPERIMENT 1C] (except uses [PROCESS 1B] ssl-derived global extractor)
     using a pretrained extractor cuts parameters in half
     implemented a resnet 18 instead of the local decoder
     testing overfit with no augmentations
@@ -153,5 +154,6 @@ instead of a single local crop per image, lets do 4
     [EXPERIMENT 4E] - fine-tuned resnet18
     identical to experiments [EXPERIMENT 4C], [EXPERIMENT 4D], but only freezing first 3 layers
 
-    Expected: equal quality overfit to [EXPERIMENT 4C], acheived with less trained parameters
+    Expected: equal quality overfit to [EXPERIMENT 4C], acheived with less trained parameters, this is because low level features are not task specific (classic transfer learning)
     Results:
+
