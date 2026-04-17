@@ -78,3 +78,25 @@ Noisy gradients in ssl slow convergence and reduce quality of latent space produ
 
     Expected: stronger performance than [EXPERIMENT 2C] because other parts of image reconstruction also receive gradients, meaning more accurate photometric reversal
     Results:
+
+
+[EXPERIMENT 3] - robust local supervision
+instead of a single local crop per image, lets do 4
+
+    [PROCESS 3A] - train SSL identically to [              ] with a batch size of 10 instead of 60
+    (this is to control for a smaller batch size due to computation requriements)
+
+    [PROCESS 3B] - train SSL identically to [PROCESS 3A], only use 4 random local reconstructions instead of 1 for local supervision
+
+
+    [EXPERIMENT 3C] - overfit identically to [EXPERIMENT 1C] with [PROCESS 3A] as static global encoder
+
+    Expected: identical to [EXPERIMENT 1C], noisier gradients during ssl training probably dont affect anything this far downstream
+    Results:
+
+
+    [EXPERIMENT 3D] - overfit identically to [EXPERIMENT 3C] with [PROCESS 3B] as static global encoder
+
+    Expected: superior performance to all previous experiments, especially in false positives, this is because features will be strongly enforced to be local in a variety of locations
+    per backprop in global encoder training
+    Results:
