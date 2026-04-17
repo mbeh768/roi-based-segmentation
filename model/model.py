@@ -1,5 +1,6 @@
 import math
 
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -170,6 +171,135 @@ class PretrainedLocalGlobalUNet(BaseModel):
         x = self.dec3(torch.cat([self.up3(x), s3], dim=1))          # (B, 128, H/4)
         x = self.dec2(torch.cat([self.up2(x), s2], dim=1))          # (B,  64, H/2)
         x = self.dec1(torch.cat([self.up1(x), s1], dim=1))          # (B,  64, H)
+
+        main = self.head(x)
+
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear',
+                align_corners=True,
+            )
+            return main, aux
+
+        return main
+
+
+class ImageNetPretrainedLocalGlobalUNet(BaseModel):
+    """
+    Like PretrainedLocalGlobalUNet, but the local encoder is a timm
+    ImageNet-pretrained CNN with the classification head stripped. The global
+    branch is still _GlobalUNet and can load SSL-pretrained weights.
+
+    freeze_local_encoder accepts either a bool (True = freeze all stages,
+    False = freeze none) or a list of stage indices in [0..4] to freeze
+    individually. Stages map to ResNet modules as:
+        0 -> conv1 + bn1   (stem, /2)
+        1 -> layer1        (/4)
+        2 -> layer2        (/8)
+        3 -> layer3        (/16)
+        4 -> layer4        (/32)
+
+    Config:
+        "arch": {"type": "ImageNetPretrainedLocalGlobalUNet", "args": {
+            "num_classes": 1,
+            "backbone": "resnet18",
+            "backbone_pretrained": true,
+            "freeze_local_encoder": [0, 1],
+            "ssl_checkpoint": "saved/models/SSL_.../checkpoint-epoch50.pth"
+        }}
+    """
+    _STAGE_MODULES = {
+        0: ['conv1', 'bn1'],
+        1: ['layer1'],
+        2: ['layer2'],
+        3: ['layer3'],
+        4: ['layer4'],
+    }
+
+    def __init__(self, num_classes=1, in_ch=3, global_ch=64,
+                 backbone='resnet18', backbone_pretrained=True,
+                 freeze_local_encoder=False,
+                 ssl_checkpoint=None, bottleneck_dropout=0.1):
+        super().__init__()
+
+        # 5-stage encoder at reductions [2, 4, 8, 16, 32]
+        self.backbone = timm.create_model(
+            backbone, pretrained=backbone_pretrained, features_only=True,
+            in_chans=in_ch, out_indices=(0, 1, 2, 3, 4),
+        )
+        enc_ch = self.backbone.feature_info.channels()   # [c1, c2, c3, c4, c5]
+        assert len(enc_ch) == 5, (
+            f"backbone {backbone} exposes {len(enc_ch)} stages; expected 5"
+        )
+        c1, c2, c3, c4, c5 = enc_ch
+
+        if freeze_local_encoder is True:
+            frozen_stages = [0, 1, 2, 3, 4]
+        elif freeze_local_encoder:
+            frozen_stages = list(freeze_local_encoder)
+        else:
+            frozen_stages = []
+        for s in frozen_stages:
+            if s not in self._STAGE_MODULES:
+                raise ValueError(
+                    f"freeze_local_encoder stage {s} invalid; must be in 0..4"
+                )
+            for mod_name in self._STAGE_MODULES[s]:
+                if not hasattr(self.backbone, mod_name):
+                    raise ValueError(
+                        f"backbone '{backbone}' does not expose '{mod_name}'; "
+                        f"stage-level freezing assumes ResNet-family structure"
+                    )
+                for p in getattr(self.backbone, mod_name).parameters():
+                    p.requires_grad = False
+
+        self.bot_drop = nn.Dropout2d(bottleneck_dropout)
+
+        self.global_enc = _GlobalUNet(in_ch=in_ch, out_ch=global_ch)
+        if ssl_checkpoint is not None:
+            ckpt = torch.load(ssl_checkpoint, map_location='cpu', weights_only=False)
+            ssl_sd = ckpt['state_dict']
+            global_enc_sd = {k.replace('unet.', ''): v
+                             for k, v in ssl_sd.items() if k.startswith('unet.')}
+            self.global_enc.load_state_dict(global_enc_sd)
+            for p in self.global_enc.parameters():
+                p.requires_grad = False
+
+        # Decoder: upsample ×2 at each step, concat with matching skip.
+        # bottleneck (/32) → /16 → /8 → /4 → /2 → H
+        self.up5  = nn.ConvTranspose2d(c5 + global_ch, c4, kernel_size=2, stride=2)
+        self.dec5 = _double_conv(c4 + c4, c4)     # + s4 (/16)
+
+        self.up4  = nn.ConvTranspose2d(c4, c3, kernel_size=2, stride=2)
+        self.dec4 = _double_conv(c3 + c3, c3)     # + s3 (/8)
+
+        self.up3  = nn.ConvTranspose2d(c3, c2, kernel_size=2, stride=2)
+        self.dec3 = _double_conv(c2 + c2, c2)     # + s2 (/4)
+
+        self.up2  = nn.ConvTranspose2d(c2, c1, kernel_size=2, stride=2)
+        self.dec2 = _double_conv(c1 + c1, c1)     # + s1 (/2)
+
+        self.up1  = nn.ConvTranspose2d(c1, c1, kernel_size=2, stride=2)
+        self.dec1 = _double_conv(c1, c1)          # no skip at full res
+
+        self.head     = nn.Conv2d(c1, num_classes, kernel_size=1)
+        self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos):
+        s1, s2, s3, s4, x = self.backbone(local)     # /2, /4, /8, /16, /32
+        x = self.bot_drop(x)
+
+        g_feat = self.global_enc(glob)
+        g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
+        x = torch.cat([x, g_ctx], dim=1)
+
+        x = self.dec5(torch.cat([self.up5(x), s4], dim=1))
+        x = self.dec4(torch.cat([self.up4(x), s3], dim=1))
+        x = self.dec3(torch.cat([self.up3(x), s2], dim=1))
+        x = self.dec2(torch.cat([self.up2(x), s1], dim=1))
+        x = self.dec1(self.up1(x))
 
         main = self.head(x)
 

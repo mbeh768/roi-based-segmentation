@@ -1,4 +1,4 @@
 import timm
 
-model = timm.create_model('resnetv2_50x1_bit', pretrained=True)
+model = timm.create_model('resnet18', pretrained=True)
 print(model)

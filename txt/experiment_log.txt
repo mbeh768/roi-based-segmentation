@@ -89,6 +89,8 @@ NOTE: testing higher weights on reconstruction would be beneficial, did not test
 [EXPERIMENT 3] - robust local supervision
 instead of a single local crop per image, lets do 4
 
+    Results: no effect
+
     [PROCESS 3A] - train SSL identically to [PROCESS 1B] with a batch size of 45 instead of 60
     (this is to control for a smaller batch size due to computation requriements)
 
@@ -101,11 +103,55 @@ instead of a single local crop per image, lets do 4
     [EXPERIMENT 3C] - overfit identically to [EXPERIMENT 1C] with [PROCESS 3A] as static global encoder
 
     Expected: identical to [EXPERIMENT 1C], noisier gradients during ssl training probably dont affect anything this far downstream
-    Results:
+    Results: slightly less stability in training compared to [EXPERIMENT 1C], likely due to lower batch size
 
 
     [EXPERIMENT 3D] - overfit identically to [EXPERIMENT 3C] with [PROCESS 3B] as static global encoder
 
     Expected: superior performance to all previous experiments, especially in false positives, this is because features will be strongly enforced to be local in a variety of locations
     per backprop in global encoder training
+    Results: no perceptible difference compared to [EXPERIMENT 3C]
+
+
+
+[EXPERIMENT 4] - gauging overfit
+
+    [EXPERIMENT 4A] - baseline
+        using static encoder from [PROCESS 1B]
+        double the epochs (1600)
+        0.2 validation split at the image (not patch level)
+        flips and 90 degree rotations
+        early stop = 50
+
+    Expected: earlystop kicks in, maybe get .8 iou on validation at best
+    Results: ~.6 on validation
+
+
+    [EXPERIMENT 4B] - 0.3 bottleneck dropout instead of 0.1, otherwise identical to [EXPERIMENT 4A]
+
+    Expected: better generalization, still not great
+    Results: trained for longer, but got identical plateau in validation
+
+
+    [EXPERIMENT 4C] - learnable resnet18
+    using a pretrained extractor cuts parameters in half
+    implemented a resnet 18 instead of the local decoder
+    testing overfit with no augmentations
+
+    Expected: virtually perfect overfit. this functionally just deepened the UNet
+    Results: 
+    NOTE: we have no formal bottleneck anymore, it would be worth looking into a dedicated bottleneck or attention mechanism to blend global and local features
+
+
+    [EXPERIMENT 4D] - static resnet18
+    identical to [EXPERIMENT 4C], with all parameters frozen in the resnet
+
+    Expected: weaker overfit than [EXPERIMENT 4C] due to low adaptability
+    Results:
+
+
+    [EXPERIMENT 4E] - fine-tuned resnet18
+    identical to experiments [EXPERIMENT 4C], [EXPERIMENT 4D], but only freezing first 3 layers
+
+    Expected: equal quality overfit to [EXPERIMENT 4C], acheived with less trained parameters
     Results:
