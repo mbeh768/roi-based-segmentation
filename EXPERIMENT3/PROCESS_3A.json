@@ -1,0 +1,68 @@
+{
+    "name": "PROCESS 3A",
+    "n_gpu": 1,
+
+    "arch": {
+        "type": "SSLGlobalUNet",
+        "args": {"in_ch": 1, "out_ch": 64}
+    },
+    "data_loader": {
+        "type": "SSLGlobalLocalDataLoader",
+        "args": {
+            "data_dir": "data/ssl",
+            "batch_size": 10,
+            "shuffle": true,
+            "validation_split": 0.1,
+            "num_workers": 2,
+            "crop_size": 32,
+            "noise_std": 0.3,
+            "color_scale_range": 0.4,
+            "blur_kernel": 7,
+            "p_blur": 0.5,
+            "mask_ratio": 0.4,
+            "p_intensity_invert": 0.2,
+            "hflip": 0.5,
+            "vflip": 0.5,
+            "rot90": 0.75,
+            "num_local_crops": 1
+        }
+    },
+    "optimizer": {
+        "type": "Adam",
+        "args": {
+            "lr": 3e-4,
+            "weight_decay": 0,
+            "amsgrad": true
+        }
+    },
+    "loss": "mse",
+    "metrics": [
+        "psnr"
+    ],
+    "lr_scheduler": {
+        "type": "CosineAnnealingLR",
+        "args": {
+            "T_max": 500,
+            "eta_min": 1e-5
+        }
+    },
+
+
+    "trainer": {
+        "epochs": 500,
+
+        "save_dir": "saved/",
+        "save_period": 10,
+        "verbosity": 2,
+
+        "monitor": "min val_loss",
+        "early_stop": 50,
+
+        "tensorboard": true,
+        "local_loss_weight": 1.0,
+        "feat_reg_weight": 0.1,
+        "save_grid_period": 10,
+        "save_grid_n": 12,
+        "global_mask_loss_weight": 1.0
+    }
+}

@@ -98,7 +98,7 @@ instead of a single local crop per image, lets do 4
     [PROCESS 3B] - train SSL identically to [PROCESS 3A], only use 4 random local reconstructions instead of 1 for local supervision
 
 
-    [EXPERIMENT 3C] - ov/erfit identically to [EXPERIMENT 1C] with [PROCESS 3A] as static global encoder
+    [EXPERIMENT 3C] - overfit identically to [EXPERIMENT 1C] with [PROCESS 3A] as static global encoder
 
     Expected: identical to [EXPERIMENT 1C], noisier gradients during ssl training probably dont affect anything this far downstream
     Results:
