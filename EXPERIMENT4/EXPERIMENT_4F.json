@@ -46,12 +46,12 @@
     "lr_scheduler": {
         "type": "CosineAnnealingLR",
         "args": {
-            "T_max": 1600,
+            "T_max": 800,
             "eta_min": 1e-05
         }
     },
     "trainer": {
-        "epochs": 1600,
+        "epochs": 800,
         "save_dir": "saved/",
         "save_period": 25,
         "verbosity": 2,

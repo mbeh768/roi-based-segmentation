@@ -164,7 +164,7 @@ instead of a single local crop per image, lets do 4
     [EXPERIMENT 4F] - overfit to augmentations with static resnet
     identical training to [EXPERIMENT 4D] except:
     added flips and 90deg rotate to training
-    doubled epochs 800 -> 1600 (still cosine annealing for the whole time), just to accomodate for harder overfit task
+    dont think it needs more epochs
 
     Expected: good overfit ~.95IoU robust imagenet features greatly outperform trained features and are robust to augmentations
     Results:
