@@ -133,6 +133,8 @@ instead of a single local crop per image, lets do 4
     Expected: better generalization, still not great
     Results: trained for longer, but got identical plateau in validation
 
+    --- IMAGENET EXPERIMENTS ---
+    Results: static imagenet encoder is perfectly viable and exceeds performance in overfit
 
     [EXPERIMENT 4C] - learnable resnet18
     trained identically to [EXPERIMENT 1C] (except uses [PROCESS 1B] ssl-derived global extractor)
@@ -141,7 +143,7 @@ instead of a single local crop per image, lets do 4
     testing overfit with no augmentations
 
     Expected: virtually perfect overfit. this functionally just deepened the UNet
-    Results: 
+    Results: virtually perfect overfit 
     NOTE: we have no formal bottleneck anymore, it would be worth looking into a dedicated bottleneck or attention mechanism to blend global and local features
 
 
@@ -149,12 +151,21 @@ instead of a single local crop per image, lets do 4
     identical to [EXPERIMENT 4C], with all parameters frozen in the resnet
 
     Expected: weaker overfit than [EXPERIMENT 4C] due to low adaptability
-    Results:
+    Results: virtually perfect overfit 
 
 
     [EXPERIMENT 4E] - fine-tuned resnet18
     identical to experiments [EXPERIMENT 4C], [EXPERIMENT 4D], but only freezing first 3 layers
 
     Expected: equal quality overfit to [EXPERIMENT 4C], acheived with less trained parameters, this is because low level features are not task specific (classic transfer learning)
+    Results: virtually perfect overfit
+
+
+    [EXPERIMENT 4F] - overfit to augmentations with static resnet
+    identical training to [EXPERIMENT 4D] except:
+    added flips and 90deg rotate to training
+    doubled epochs 800 -> 1600 (still cosine annealing for the whole time), just to accomodate for harder overfit task
+
+    Expected: good overfit ~.95IoU robust imagenet features greatly outperform trained features and are robust to augmentations
     Results:
 
