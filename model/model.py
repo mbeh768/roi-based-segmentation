@@ -224,6 +224,9 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
                  ssl_checkpoint=None, bottleneck_dropout=0.1):
         super().__init__()
 
+        if ssl_checkpoint is None:
+            raise ValueError("ssl_checkpoint is required for ImageNetPretrainedLocalGlobalUNet")
+
         # 5-stage encoder at reductions [2, 4, 8, 16, 32]
         self.backbone = timm.create_model(
             backbone, pretrained=backbone_pretrained, features_only=True,
