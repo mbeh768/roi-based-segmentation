@@ -196,10 +196,9 @@ class LocalGlobalDataset(Dataset):
 
         roi = None
         if self.require_roi:
+            roi = torch.load(self.stem_to_roi[stem], weights_only=True)
             if self.roi_jitter > 0 and random.random() < self.roi_jitter:
-                roi = global_mask
-            else:
-                roi = torch.load(self.stem_to_roi[stem], weights_only=True)
+                roi = torch.ones_like(roi)
 
         if self.augment:
             if roi is not None:

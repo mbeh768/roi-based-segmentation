@@ -202,10 +202,10 @@ so upon inference, it will ask for a mask, you put in the mask and it spits out 
     Trained identically to [EXPERIMENT 4G] with bottleneck dropout in the correct place
 
     Expected: identical results, failure, need roi augmentation
-    Results:
+    Results: massive improvement in validation plateau, around 0.75 up from 0.55. this has merit
 
 
     [EXPERIMENT 5B] - identical to [EXPERIMENT 5A], except with a 25% chance a tile turns to roi foreground
 
     Expected: slightly better perfomance than 5A, but more will have to be dosent
-    Results: 
+    Results: identical to experiment 5A

@@ -334,6 +334,82 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
         return main
 
 
+class ImageNetPretrainedLocalGlobalUNetLightDecoder(ImageNetPretrainedLocalGlobalUNet):
+    """
+    Lighter decoder variant of ImageNetPretrainedLocalGlobalUNet.
+
+    Skip connections are taken from every OTHER ResNet stage — specifically
+    s4 (/16) and s2 (/4). The intermediate stages (s3, s1) are skipped, and the
+    upsample between skip fusions is 4× rather than 2×. A single double_conv
+    follows each skip-concat.
+
+    Layout:
+        bottleneck (/32)
+          → up5 (×2)          → concat s4 (/16)  → dec5 double_conv
+          → up3 (×4)          → concat s2 (/4)   → dec3 double_conv
+          → up1 (×4, no skip) → dec1 double_conv → head
+    """
+    def __init__(self, num_classes=1, in_ch=3, global_ch=64,
+                 backbone='resnet18', backbone_pretrained=True,
+                 freeze_local_encoder=False,
+                 ssl_checkpoint=None, bottleneck_dropout=0.1,
+                 use_roi=False, roi_ch=1):
+        super().__init__(
+            num_classes=num_classes, in_ch=in_ch, global_ch=global_ch,
+            backbone=backbone, backbone_pretrained=backbone_pretrained,
+            freeze_local_encoder=freeze_local_encoder,
+            ssl_checkpoint=ssl_checkpoint, bottleneck_dropout=bottleneck_dropout,
+            use_roi=use_roi, roi_ch=roi_ch,
+        )
+        c1, c2, c3, c4, c5 = self.backbone.feature_info.channels()
+
+        # Replace the full-depth decoder with a 3-step version.
+        del self.up5, self.dec5, self.up4, self.dec4, self.up3, self.dec3
+        del self.up2, self.dec2, self.up1, self.dec1
+
+        self.up5  = nn.ConvTranspose2d(c5 + global_ch + self.roi_ch, c4,
+                                       kernel_size=2, stride=2)
+        self.dec5 = _double_conv(c4 + c4, c4)                   # + s4 (/16)
+
+        self.up3  = nn.ConvTranspose2d(c4, c2, kernel_size=4, stride=4)
+        self.dec3 = _double_conv(c2 + c2, c2)                   # + s2 (/4)
+
+        self.up1  = nn.ConvTranspose2d(c2, c1, kernel_size=4, stride=4)
+        self.dec1 = _double_conv(c1, c1)                        # no skip at full res
+
+        self.head = nn.Conv2d(c1, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos, roi=None):
+        s1, s2, s3, s4, x = self.backbone(local)     # /2, /4, /8, /16, /32
+
+        g_feat = self.global_enc(glob)
+        g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
+        if self.use_roi:
+            assert roi is not None, "use_roi=True but no roi tensor was passed to forward()"
+            roi_ctx = _crop_and_resize(roi, pos, *x.shape[2:])
+            x = torch.cat([x, g_ctx, roi_ctx], dim=1)
+        else:
+            x = torch.cat([x, g_ctx], dim=1)
+
+        x = self.dec5(torch.cat([self.up5(x), s4], dim=1))      # /16
+        x = self.bot_drop(x)
+        x = self.dec3(torch.cat([self.up3(x), s2], dim=1))      # /4
+        x = self.dec1(self.up1(x))                              # full
+
+        main = self.head(x)
+
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear',
+                align_corners=True,
+            )
+            return main, aux
+
+        return main
+
+
 class SSLGlobalUNet(BaseModel):
     """
     Self-supervised wrapper around _GlobalUNet for pretraining.
