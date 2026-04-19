@@ -1,12 +1,24 @@
+---- Maximum Improvement of Reconstruction-Based SSL ---
+[EXPERIMENT 1]
+[EXPERIMENT 2]
+[EXPERIMENT 3]
 
+---- Parameter Reduction ----
+[EXPERIMENT 4]
+[EXPERIMENT 5]
 
----- Maximum Improvment of Reconstruction-Based SSL ---
+---- Validation Performance ----
+[EXPERIMENT 4]
+[EXPERIMENT 5]
 
 two branches
     global - reconstruction of the global image following the key augmentation of removing a large rectangular region from the image
     local - reconstruction of the actual local region based on global features
 
 
+definitions:
+[EXPERIMENT #α] - process undertaken to gain information
+[PROCESS #α] - process undertaken that does not gain meaningful information, typically to enable an experiment
 
 
 [EXPERIMENT 1] - establishing a baseline
@@ -170,6 +182,7 @@ NOTE: regularization was incorrectly applied until experiment 4H
     Expected: good overfit ~.95IoU robust imagenet features greatly outperform trained features and are robust to augmentations
     Results: slow overfit, bad judgement call on epoch limit but it has capacity for superior
 
+    --- NOTE: i made an error and enabled visualize previews until experiment 5c in the configs, didnt hurt anything but if you go back thats why ---
 
     [EXPERIMENT 4G] - real training with static encoder
     hopefully, because the only trainable component gets input from feature space with theoretically very limited variability
