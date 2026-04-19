@@ -343,6 +343,12 @@ class ImageNetPretrainedLocalGlobalUNetLightDecoder(ImageNetPretrainedLocalGloba
     upsample between skip fusions is 4× rather than 2×. A single double_conv
     follows each skip-concat.
 
+    decoder_ch (optional) collapses the entire decoder to a single narrow
+    width. When set, up5 outputs decoder_ch channels and the s4 / s2 skips
+    are projected to decoder_ch via 1×1 convs before concat. This is the big
+    param-saver because up5 + dec5 dominate the trainable parameter count
+    (resnet18: c4=256, c5=512 → ~2.4M of ~3.6M).
+
     Layout:
         bottleneck (/32)
           → up5 (×2)          → concat s4 (/16)  → dec5 double_conv
@@ -353,7 +359,8 @@ class ImageNetPretrainedLocalGlobalUNetLightDecoder(ImageNetPretrainedLocalGloba
                  backbone='resnet18', backbone_pretrained=True,
                  freeze_local_encoder=False,
                  ssl_checkpoint=None, bottleneck_dropout=0.1,
-                 use_roi=False, roi_ch=1):
+                 use_roi=False, roi_ch=1,
+                 decoder_ch=None):
         super().__init__(
             num_classes=num_classes, in_ch=in_ch, global_ch=global_ch,
             backbone=backbone, backbone_pretrained=backbone_pretrained,
@@ -362,22 +369,25 @@ class ImageNetPretrainedLocalGlobalUNetLightDecoder(ImageNetPretrainedLocalGloba
             use_roi=use_roi, roi_ch=roi_ch,
         )
         c1, c2, c3, c4, c5 = self.backbone.feature_info.channels()
+        d = decoder_ch if decoder_ch is not None else c4
 
         # Replace the full-depth decoder with a 3-step version.
         del self.up5, self.dec5, self.up4, self.dec4, self.up3, self.dec3
         del self.up2, self.dec2, self.up1, self.dec1
 
-        self.up5  = nn.ConvTranspose2d(c5 + global_ch + self.roi_ch, c4,
-                                       kernel_size=2, stride=2)
-        self.dec5 = _double_conv(c4 + c4, c4)                   # + s4 (/16)
+        self.up5     = nn.ConvTranspose2d(c5 + global_ch + self.roi_ch, d,
+                                          kernel_size=2, stride=2)
+        self.s4_proj = nn.Conv2d(c4, d, kernel_size=1) if d != c4 else nn.Identity()
+        self.dec5    = _double_conv(d + d, d)                   # + s4 (/16)
 
-        self.up3  = nn.ConvTranspose2d(c4, c2, kernel_size=4, stride=4)
-        self.dec3 = _double_conv(c2 + c2, c2)                   # + s2 (/4)
+        self.up3     = nn.ConvTranspose2d(d, d, kernel_size=4, stride=4)
+        self.s2_proj = nn.Conv2d(c2, d, kernel_size=1) if d != c2 else nn.Identity()
+        self.dec3    = _double_conv(d + d, d)                   # + s2 (/4)
 
-        self.up1  = nn.ConvTranspose2d(c2, c1, kernel_size=4, stride=4)
-        self.dec1 = _double_conv(c1, c1)                        # no skip at full res
+        self.up1     = nn.ConvTranspose2d(d, d, kernel_size=4, stride=4)
+        self.dec1    = _double_conv(d, d)                        # no skip at full res
 
-        self.head = nn.Conv2d(c1, num_classes, kernel_size=1)
+        self.head = nn.Conv2d(d, num_classes, kernel_size=1)
 
     def forward(self, local, glob, pos, roi=None):
         s1, s2, s3, s4, x = self.backbone(local)     # /2, /4, /8, /16, /32
@@ -391,10 +401,10 @@ class ImageNetPretrainedLocalGlobalUNetLightDecoder(ImageNetPretrainedLocalGloba
         else:
             x = torch.cat([x, g_ctx], dim=1)
 
-        x = self.dec5(torch.cat([self.up5(x), s4], dim=1))      # /16
+        x = self.dec5(torch.cat([self.up5(x), self.s4_proj(s4)], dim=1))    # /16
         x = self.bot_drop(x)
-        x = self.dec3(torch.cat([self.up3(x), s2], dim=1))      # /4
-        x = self.dec1(self.up1(x))                              # full
+        x = self.dec3(torch.cat([self.up3(x), self.s2_proj(s2)], dim=1))    # /4
+        x = self.dec1(self.up1(x))                                          # full
 
         main = self.head(x)
 

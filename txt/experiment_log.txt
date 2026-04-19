@@ -221,7 +221,7 @@ so upon inference, it will ask for a mask, you put in the mask and it spits out 
     [EXPERIMENT 5B] - identical to [EXPERIMENT 5A], except with a 25% chance a tile turns to roi foreground
 
     Expected: slightly better perfomance than 5A, but more will have to be dosent
-    Results: 
+    Results: hurt overfit significantly
 
     
     [EXPERIMENT 5C] - significant ROI jitter
@@ -230,7 +230,7 @@ so upon inference, it will ask for a mask, you put in the mask and it spits out 
     increasing ROI_jitter to 0.75, otherwise identical to [EXPERIMENT 5B]
 
     Expected: destroys performance, more akin to [EXPERIMENT 5A]
-    Results:
+    Results: order of magnitude less damage going from [EXPERIMENT 5B -> 5C] compared to [EXPERIMENT 5A -> 5B], probably learns to ignore rois
 
 
     [EXPERIMENT 5D] - lightweight decoder -> overfit experiment, no ROI
@@ -253,5 +253,26 @@ so upon inference, it will ask for a mask, you put in the mask and it spits out 
 
     NOTE: after this you should look at failure modes qualitativley
     Expected: failure in validation, we have significant dataset restrictions
-    Results: 
-    
+    Results:
+
+
+    [EXPERIMENT 5F] - narrow decoder -> overfit experiment, no ROI
+    cutting half the decoder only trimmed ~700k params — most trainable params
+    live in up5 + dec5 because c5=512 and c4=256 dominate that block (~2.4M of ~3.6M)
+    collapsing the entire decoder to decoder_ch=64 via 1x1 projections on the s4 and s2 skips
+    kills ~1.5M params in dec5 alone
+    identical to [EXPERIMENT 5D] otherwise
+
+    Expected: still overfits, just slower; if it cant overfit the decoder is now too small
+    Results:
+
+
+    [EXPERIMENT 5G] - narrow decoder -> validation experiment, with ROI
+    same narrow decoder as [EXPERIMENT 5F]
+    identical to [EXPERIMENT 5E] otherwise (ROI on, validation split)
+
+    Expected: similar val plateau to [EXPERIMENT 5E] but with far fewer params;
+    if worse, the narrow decoder has lost capacity; if equal or better, proof
+    that the params we cut were redundant given the ROI prior
+    Results:
+
