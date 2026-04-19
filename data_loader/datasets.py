@@ -132,18 +132,25 @@ class LocalGlobalDataset(Dataset):
         coordinates.json     — patch index with stem, x, y, image_W, image_H
 
     Returns (local, glob, pos, mask) where pos = [y0, x0, y1, x1] normalised.
+    If require_roi=True, also loads a per-stem ROI mask written by
+    annotate_globals.py (roi_<stem>.pt, shape (1, H, W)) and returns it alongside
+    the other tensors.
     """
-    def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0):
+    def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0,
+                 require_roi=False, roi_jitter=0.0):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
         self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
         self.augment = any(v > 0 for v in self.aug_flags.values())
+        self.require_roi = require_roi
+        self.roi_jitter = roi_jitter
 
         # Photometric — applied to local only (add blur, erasure, etc. here)
         self.photo_transform = None
 
         self.items = []
+        self.stem_to_roi = {}
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
             stem = coords_file.parent.name
             with open(coords_file) as f:
@@ -151,6 +158,14 @@ class LocalGlobalDataset(Dataset):
             for entry in entries:
                 patch_path = coords_file.parent / entry['filename']
                 self.items.append((patch_path, stem, entry))
+            if self.require_roi:
+                roi_path = coords_file.parent / f'roi_{stem}.pt'
+                if not roi_path.exists():
+                    raise FileNotFoundError(
+                        f"require_roi=True but missing ROI for stem '{stem}': {roi_path}. "
+                        f"Run annotate_globals.py --data-dir {data_dir}."
+                    )
+                self.stem_to_roi[stem] = roi_path
 
         assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
 
@@ -179,13 +194,27 @@ class LocalGlobalDataset(Dataset):
             raise FileNotFoundError(f"Global mask not found: {global_mask_path}")
         global_mask = torch.load(global_mask_path, weights_only=True)
 
+        roi = None
+        if self.require_roi:
+            if self.roi_jitter > 0 and random.random() < self.roi_jitter:
+                roi = global_mask
+            else:
+                roi = torch.load(self.stem_to_roi[stem], weights_only=True)
+
         if self.augment:
-            local, glob, mask, global_mask, pos = _geo_augment(
-                local, glob, mask, global_mask, pos=pos, flags=self.aug_flags,
-            )
+            if roi is not None:
+                local, glob, roi, mask, global_mask, pos = _geo_augment(
+                    local, glob, roi, mask, global_mask, pos=pos, flags=self.aug_flags,
+                )
+            else:
+                local, glob, mask, global_mask, pos = _geo_augment(
+                    local, glob, mask, global_mask, pos=pos, flags=self.aug_flags,
+                )
         if self.photo_transform is not None:
             local = self.photo_transform(local)
 
+        if roi is not None:
+            return local, glob, pos, roi, mask, global_mask
         return local, glob, pos, mask, global_mask
 
     def foreground_indices(self, min_ratio=0.05):
@@ -232,22 +261,31 @@ class LocalGlobalDataset(Dataset):
             p2 = (int(x1 * W), int(y1 * H))
             return cv2.rectangle(img.copy(), p1, p2, (0, 255, 0), 2)
 
+        def _unpack(sample):
+            """Return (local, glob, pos, roi, mask, gmask) regardless of whether
+            ROIs are enabled (roi is None when not)."""
+            if len(sample) == 6:
+                local, glob, pos, roi, mask, gmask = sample
+                return local, glob, pos, roi, mask, gmask
+            local, glob, pos, mask, gmask = sample
+            return local, glob, pos, None, mask, gmask
+
         n = min(n_samples, len(self.items))
         idxs = random.sample(range(len(self.items)), n)
         for i in idxs:
             # before
-            local_b, glob_b, pos_b, mask_b, gmask_b = self[i]
+            before = _unpack(self[i])
             # after
             self.augment = True
-            local_a, glob_a, pos_a, mask_a, gmask_a = self[i]
+            after = _unpack(self[i])
             self.augment = False
 
             border_px = 4
             border_color = (0, 255, 0)
             rows = []
-            for local, glob, pos, mask, gmask, label in [
-                (local_b, glob_b, pos_b, mask_b, gmask_b, 'before'),
-                (local_a, glob_a, pos_a, mask_a, gmask_a, 'after'),
+            for (local, glob, pos, roi, mask, gmask), label in [
+                (before, 'before'),
+                (after,  'after'),
             ]:
                 g = _draw_pos(_tensor_to_bgr(glob),  pos)
                 gm = _draw_pos(_tensor_to_bgr(gmask), pos)
@@ -257,10 +295,14 @@ class LocalGlobalDataset(Dataset):
                 gh = g.shape[0]
                 l = cv2.resize(l, (gh, gh))
                 m = cv2.resize(m, (gh, gh))
+                panel_tensors = [g, gm, l, m]
+                if roi is not None:
+                    r = _draw_pos(_tensor_to_bgr(roi), pos)
+                    panel_tensors.insert(2, r)  # place ROI next to global mask
                 panels = [
                     cv2.copyMakeBorder(p, border_px, border_px, border_px, border_px,
                                        cv2.BORDER_CONSTANT, value=border_color)
-                    for p in (g, gm, l, m)
+                    for p in panel_tensors
                 ]
                 row = np.concatenate(panels, axis=1)
                 cv2.putText(row, label, (10, 30),

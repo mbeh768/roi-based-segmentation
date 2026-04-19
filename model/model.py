@@ -201,13 +201,20 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
         3 -> layer3        (/16)
         4 -> layer4        (/32)
 
+    When use_roi=True, the forward pass accepts an extra (B, roi_ch, H_g, W_g)
+    mask tensor (typically produced by annotate_globals.py). The ROI is cropped
+    at the same normalised pos as the local patch via _crop_and_resize and
+    concatenated alongside the global context at the bottleneck.
+
     Config:
         "arch": {"type": "ImageNetPretrainedLocalGlobalUNet", "args": {
             "num_classes": 1,
             "backbone": "resnet18",
             "backbone_pretrained": true,
             "freeze_local_encoder": [0, 1],
-            "ssl_checkpoint": "saved/models/SSL_.../checkpoint-epoch50.pth"
+            "ssl_checkpoint": "saved/models/SSL_.../checkpoint-epoch50.pth",
+            "use_roi": true,
+            "roi_ch": 1
         }}
     """
     _STAGE_MODULES = {
@@ -221,11 +228,15 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
     def __init__(self, num_classes=1, in_ch=3, global_ch=64,
                  backbone='resnet18', backbone_pretrained=True,
                  freeze_local_encoder=False,
-                 ssl_checkpoint=None, bottleneck_dropout=0.1):
+                 ssl_checkpoint=None, bottleneck_dropout=0.1,
+                 use_roi=False, roi_ch=1):
         super().__init__()
 
         if ssl_checkpoint is None:
             raise ValueError("ssl_checkpoint is required for ImageNetPretrainedLocalGlobalUNet")
+
+        self.use_roi = use_roi
+        self.roi_ch = roi_ch if use_roi else 0
 
         # 5-stage encoder at reductions [2, 4, 8, 16, 32]
         self.backbone = timm.create_model(
@@ -272,7 +283,7 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
 
         # Decoder: upsample ×2 at each step, concat with matching skip.
         # bottleneck (/32) → /16 → /8 → /4 → /2 → H
-        self.up5  = nn.ConvTranspose2d(c5 + global_ch, c4, kernel_size=2, stride=2)
+        self.up5  = nn.ConvTranspose2d(c5 + global_ch + self.roi_ch, c4, kernel_size=2, stride=2)
         self.dec5 = _double_conv(c4 + c4, c4)     # + s4 (/16)
 
         self.up4  = nn.ConvTranspose2d(c4, c3, kernel_size=2, stride=2)
@@ -290,12 +301,17 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
         self.head     = nn.Conv2d(c1, num_classes, kernel_size=1)
         self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
 
-    def forward(self, local, glob, pos):
+    def forward(self, local, glob, pos, roi=None):
         s1, s2, s3, s4, x = self.backbone(local)     # /2, /4, /8, /16, /32
 
         g_feat = self.global_enc(glob)
         g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
-        x = torch.cat([x, g_ctx], dim=1)
+        if self.use_roi:
+            assert roi is not None, "use_roi=True but no roi tensor was passed to forward()"
+            roi_ctx = _crop_and_resize(roi, pos, *x.shape[2:])
+            x = torch.cat([x, g_ctx, roi_ctx], dim=1)
+        else:
+            x = torch.cat([x, g_ctx], dim=1)
 
         x = self.dec5(torch.cat([self.up5(x), s4], dim=1))
         x = self.bot_drop(x)

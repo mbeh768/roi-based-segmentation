@@ -65,8 +65,12 @@ class LocalGlobalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0,
                  num_workers=1, visualize=None,
                  hflip=0.0, vflip=0.0, rot90=0.0,
-                 fg_ratio=0.0, fg_min=0.05):
-        self.dataset = LocalGlobalDataset(data_dir, hflip=hflip, vflip=vflip, rot90=rot90)
+                 fg_ratio=0.0, fg_min=0.05,
+                 require_roi=False, roi_jitter=0.0):
+        self.dataset = LocalGlobalDataset(
+            data_dir, hflip=hflip, vflip=vflip, rot90=rot90,
+            require_roi=require_roi, roi_jitter=roi_jitter,
+        )
         if visualize:
             self.dataset.save_visualizations(visualize)
         self._batch_size = batch_size

@@ -95,7 +95,24 @@ def stitch(tile_maps, ys, xs, H, W, tile_size, stride):
     return canvas / count.clamp(min=1)
 
 
-def run_one(img_path, mask_path, model, device, p, threshold, title, output=None):
+def _resolve_roi(roi_arg, img_path, config):
+    """Return a (1, H, W) float32 ROI tensor, or None if not required."""
+    if roi_arg is not None:
+        return torch.load(Path(roi_arg), weights_only=True)
+    # Auto-lookup: data_dir/images/<stem>/roi_<stem>.pt, matching preprocess layout.
+    try:
+        data_dir = Path(config['data_loader']['args']['data_dir'])
+    except (KeyError, TypeError):
+        return None
+    stem = img_path.stem.replace('_image', '').replace('_mask', '')
+    candidate = data_dir / 'images' / stem / f'roi_{stem}.pt'
+    if candidate.exists():
+        return torch.load(candidate, weights_only=True)
+    return None
+
+
+def run_one(img_path, mask_path, model, device, p, threshold, title, output=None,
+            roi_path=None, config=None):
     print(f"\nPreprocessing {img_path.name}...")
     tiles, ys, xs, H, W, tile_size, stride, full_arr = tif_to_tiles(img_path, p, is_mask=False)
     glob = tif_to_tensor(img_path, p.c, is_mask=False)   # (3, global_H, global_W)
@@ -118,8 +135,19 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
     ]
     pos_batch = torch.stack(pos_list).to(device)                   # (N, 4)
 
+    model_args = [local_batch, glob_batch, pos_batch]
+    if getattr(model, 'use_roi', False):
+        roi = _resolve_roi(roi_path, img_path, config)
+        if roi is None:
+            raise FileNotFoundError(
+                f"model has use_roi=True but no ROI found for {img_path.name}. "
+                f"Pass --roi <path/to/roi_<stem>.pt> or run annotate_globals.py."
+            )
+        roi_batch = roi.unsqueeze(0).expand(N, -1, -1, -1).to(device)  # (N, roi_ch, gH, gW)
+        model_args.append(roi_batch)
+
     with torch.no_grad():
-        logits = model(local_batch, glob_batch, pos_batch)         # (N, 1, tile_H, tile_W)
+        logits = model(*model_args)                               # (N, 1, tile_H, tile_W)
     probs_tiles = torch.sigmoid(logits).squeeze(1).cpu()           # (N, tile_H, tile_W)
 
     prob_map = stitch(list(probs_tiles), ys, xs, H, W, tile_size, stride)
@@ -181,11 +209,13 @@ def main(args):
         print(f"Found {len(pairs)} image/mask pairs")
         for i, (img_path, mask_path) in enumerate(pairs):
             title = f"{img_path.name}  [{i+1}/{len(pairs)}]"
-            run_one(img_path, mask_path, model, device, p, args.threshold, title, args.output)
+            run_one(img_path, mask_path, model, device, p, args.threshold, title,
+                    args.output, roi_path=args.roi, config=raw_config)
     else:
         img_path  = Path(args.image)
         mask_path = Path(args.mask) if args.mask else None
-        run_one(img_path, mask_path, model, device, p, args.threshold, img_path.name, args.output)
+        run_one(img_path, mask_path, model, device, p, args.threshold, img_path.name,
+                args.output, roi_path=args.roi, config=raw_config)
 
 
 if __name__ == '__main__':
@@ -200,6 +230,9 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--config', default='config.json',
                         help='config JSON with preprocess section (default: config.json)')
     parser.add_argument('--mask',         default=None,  help='ground-truth mask TIFF (single-image mode)')
+    parser.add_argument('--roi',          default=None,
+                        help='path to roi_<stem>.pt (required if model was trained with use_roi=true; '
+                             'if omitted, inference will try data_dir/images/<stem>/roi_<stem>.pt)')
     parser.add_argument('--output',       default=None,  help='save figure here instead of displaying')
     parser.add_argument('--threshold',    default=0.5, type=float,
                         help='sigmoid threshold for binary prediction (default 0.5)')

@@ -188,4 +188,24 @@ NOTE: regularization was incorrectly applied until experiment 4H
 
     Expected: failure to overfit, but validation performance tracks closely, this would mean tone down regularization
     or add it do downstream layers and easy off at "bottleneck"
+    Results: identical, cant seem to overfit, i could mess with this all i want but i think the most productive and realistic thing
+    to focus on is incorporating manual annotation so it becomes a refinement task rather than pure segmentation
+
+
+
+[EXPERIMENT 5] - accepting my fate 
+we must add manual ROI annotation
+to keep things fast, following preprocessing the user will annotate the global downsample quickly (supposed to be like 10s)
+so upon inference, it will ask for a mask, you put in the mask and it spits out a high res segmentation
+
+    [EXPERIMENT 5A] - validation with ROI'same
+    Trained identically to [EXPERIMENT 4G] with bottleneck dropout in the correct place
+
+    Expected: identical results, failure, need roi augmentation
     Results:
+
+
+    [EXPERIMENT 5B] - identical to [EXPERIMENT 5A], except with a 25% chance a tile turns to roi foreground
+
+    Expected: slightly better perfomance than 5A, but more will have to be dosent
+    Results: 
