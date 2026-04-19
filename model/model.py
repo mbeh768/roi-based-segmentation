@@ -292,13 +292,13 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
 
     def forward(self, local, glob, pos):
         s1, s2, s3, s4, x = self.backbone(local)     # /2, /4, /8, /16, /32
-        x = self.bot_drop(x)
 
         g_feat = self.global_enc(glob)
         g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
         x = torch.cat([x, g_ctx], dim=1)
 
         x = self.dec5(torch.cat([self.up5(x), s4], dim=1))
+        x = self.bot_drop(x)
         x = self.dec4(torch.cat([self.up4(x), s3], dim=1))
         x = self.dec3(torch.cat([self.up3(x), s2], dim=1))
         x = self.dec2(torch.cat([self.up2(x), s1], dim=1))

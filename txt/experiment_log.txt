@@ -116,6 +116,7 @@ instead of a single local crop per image, lets do 4
 
 
 [EXPERIMENT 4] - gauging overfit
+NOTE: regularization was incorrectly applied until experiment 4H
 
     [EXPERIMENT 4A] - baseline
         using static encoder from [PROCESS 1B]
@@ -177,4 +178,14 @@ instead of a single local crop per image, lets do 4
     Trainable parameters: 3296194, we could cut this in half in theory if it dosent work, probably going to do it even if it does
 
     Expected: i expect failure to generalize, encoder still has millions of parameters, next step is to decrease decoder params
+    Results: failure, validation loss lags, metrics are abysmal
+
+
+    [EXPERIMENT 4H] - agressive regularization at bottleneck
+    identical to [EXPERIMENT 4G], but with 0.5 bottleneck dropout
+    note bottleneck dropout is sort of a misnomer i am just applying it to the layer after the concatenation of the global feat map
+    note this is moved forward from where it was, which was a horrible spot for it because it was acting on a frozen encoder
+
+    Expected: failure to overfit, but validation performance tracks closely, this would mean tone down regularization
+    or add it do downstream layers and easy off at "bottleneck"
     Results:

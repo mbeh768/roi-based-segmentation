@@ -39,6 +39,73 @@ class Trainer(BaseTrainer):
         self.train_metrics = MetricTracker(*train_keys, *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
 
+        self._save_train_val_previews()
+
+    def _save_train_val_previews(self):
+        """Dump each unique stem's global.pt to log_dir/sets/{train,val}/<stem>.png
+        so it's possible to visually verify which slides are in each split."""
+        out_root = Path(self.config.log_dir) / 'sets'
+
+        def _indices(sampler, dataset_len):
+            if sampler is None:
+                return list(range(dataset_len))
+            if hasattr(sampler, 'fg') and hasattr(sampler, 'bg'):
+                return list(sampler.fg) + list(sampler.bg)
+            if hasattr(sampler, 'indices'):
+                return list(sampler.indices)
+            return list(iter(sampler))
+
+        def _stems(dataset, indices):
+            items = getattr(dataset, 'items', None)
+            if items is not None:
+                return {items[i][1] for i in indices}
+            pairs = getattr(dataset, 'pairs', None)
+            if pairs is not None:
+                return {Path(pairs[i][0]).parent.name for i in indices}
+            return set()
+
+        def _image_dir(dataset):
+            if hasattr(dataset, 'image_dir'):
+                return dataset.image_dir
+            pairs = getattr(dataset, 'pairs', None)
+            if pairs:
+                return Path(pairs[0][0]).parent.parent
+            return None
+
+        def _dump(stems, dataset, out_dir):
+            image_dir = _image_dir(dataset)
+            if image_dir is None or not stems:
+                return 0
+            out_dir.mkdir(parents=True, exist_ok=True)
+            n = 0
+            for stem in sorted(stems):
+                global_path = image_dir / stem / 'global.pt'
+                if not global_path.exists():
+                    continue
+                t = torch.load(global_path, weights_only=True).detach().cpu().float()
+                lo, hi = t.min(), t.max()
+                t = (t - lo) / (hi - lo + 1e-8)
+                arr = (t.numpy() * 255).astype(np.uint8)
+                if arr.ndim == 3:
+                    if arr.shape[0] == 1:
+                        arr = np.repeat(arr, 3, axis=0)
+                    arr = arr.transpose(1, 2, 0)
+                    arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(out_dir / f'{stem}.png'), arr)
+                n += 1
+            return n
+
+        train_ds = self.data_loader.dataset
+        train_idx = _indices(self.data_loader.sampler, len(train_ds))
+        n_train = _dump(_stems(train_ds, train_idx), train_ds, out_root / 'train')
+        self.logger.info(f'Saved {n_train} train globals to {out_root / "train"}')
+
+        if self.do_validation:
+            val_ds = self.valid_data_loader.dataset
+            val_idx = _indices(self.valid_data_loader.sampler, len(val_ds))
+            n_val = _dump(_stems(val_ds, val_idx), val_ds, out_root / 'val')
+            self.logger.info(f'Saved {n_val} val globals to {out_root / "val"}')
+
     def _train_epoch(self, epoch):
         """
         Training logic for an epoch
