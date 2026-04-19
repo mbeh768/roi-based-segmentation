@@ -167,5 +167,14 @@ instead of a single local crop per image, lets do 4
     dont think it needs more epochs
 
     Expected: good overfit ~.95IoU robust imagenet features greatly outperform trained features and are robust to augmentations
-    Results:
+    Results: slow overfit, bad judgement call on epoch limit but it has capacity for superior
 
+
+    [EXPERIMENT 4G] - real training with static encoder
+    hopefully, because the only trainable component gets input from feature space with theoretically very limited variability
+    (both encoders are completely static) we should be able to generalize quite well
+    training with identical config to [EXPERIMENT 4F], but with 0.2 validation_split
+    Trainable parameters: 3296194, we could cut this in half in theory if it dosent work, probably going to do it even if it does
+
+    Expected: i expect failure to generalize, encoder still has millions of parameters, next step is to decrease decoder params
+    Results:
