@@ -208,4 +208,37 @@ so upon inference, it will ask for a mask, you put in the mask and it spits out 
     [EXPERIMENT 5B] - identical to [EXPERIMENT 5A], except with a 25% chance a tile turns to roi foreground
 
     Expected: slightly better perfomance than 5A, but more will have to be dosent
-    Results: identical to experiment 5A
+    Results: 
+
+    
+    [EXPERIMENT 5C] - significant ROI jitter
+    since [EXPERIMENT 5B] did not affect results, we need to push and see what the useful/harmful threshold is, it seems we are
+    below the decision region by qute a lot:
+    increasing ROI_jitter to 0.75, otherwise identical to [EXPERIMENT 5B]
+
+    Expected: destroys performance, more akin to [EXPERIMENT 5A]
+    Results:
+
+
+    [EXPERIMENT 5D] - lightweight decoder -> overfit experiment, no ROI
+    we can reduce parameters to:
+    by lightening up the decoder, model overfits so fast this is a logical step, probably would have been logical before
+    ROI inclusion
+    cut off half of the decoder, skips now occur every other layer
+    identical to [EXPERIMENT 5A] otherwise
+
+    Expected: overfit after slightly more time, the shallow UNet did the trick so i have hopes for this
+    Results: 
+
+
+    [EXPERIMENT 5E] - lightweight decoder -> validation experiment > with ROI
+    we can reduce parameters to:
+    by lightening up the decoder, model overfits so fast this is a logical step, probably would have been logical before
+    ROI inclusion
+    cut off half of the decoder, skips now occur every other layer
+    identical to [EXPERIMENT 5D] otherwise
+
+    NOTE: after this you should look at failure modes qualitativley
+    Expected: failure in validation, we have significant dataset restrictions
+    Results: 
+    
