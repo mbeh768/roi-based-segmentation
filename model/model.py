@@ -420,6 +420,94 @@ class ImageNetPretrainedLocalGlobalUNetLightDecoder(ImageNetPretrainedLocalGloba
         return main
 
 
+class ImageNetPretrainedLocalGlobalUNetMinimalDecoder(ImageNetPretrainedLocalGlobalUNet):
+    """
+    Maximally stripped decoder for the ROI-primed setup.
+
+    Design choices vs. the light decoder:
+      - Same 2 skip connections (s4 at /16, s2 at /4)
+      - decoder_ch defaults to 8 (chosen so a single GN group of 8 channels
+        still works if we ever switch back; we use BatchNorm2d here instead to
+        allow going even lower without tripping GroupNorm)
+      - Single conv + BN + ReLU after each skip (no more double_conv)
+      - Bilinear upsample instead of ConvTranspose2d — zero parameters
+      - A 1×1 projection collapses the (c5 + global_ch + roi_ch) bottleneck
+        stack to decoder_ch before the first upsample
+      - No trailing dec1 block — final bilinear up + head only
+
+    Trainable decoder params at decoder_ch=8 collapse from ~3.6M (full)
+    / ~2.9M (light) / ~1.5M-ish (narrow light) to under 10k.
+    """
+    def __init__(self, num_classes=1, in_ch=3, global_ch=64,
+                 backbone='resnet18', backbone_pretrained=True,
+                 freeze_local_encoder=False,
+                 ssl_checkpoint=None, bottleneck_dropout=0.1,
+                 use_roi=False, roi_ch=1,
+                 decoder_ch=8):
+        super().__init__(
+            num_classes=num_classes, in_ch=in_ch, global_ch=global_ch,
+            backbone=backbone, backbone_pretrained=backbone_pretrained,
+            freeze_local_encoder=freeze_local_encoder,
+            ssl_checkpoint=ssl_checkpoint, bottleneck_dropout=bottleneck_dropout,
+            use_roi=use_roi, roi_ch=roi_ch,
+        )
+        _, c2, _, c4, c5 = self.backbone.feature_info.channels()
+        d = decoder_ch
+
+        # Replace the full-depth decoder wholesale.
+        del self.up5, self.dec5, self.up4, self.dec4, self.up3, self.dec3
+        del self.up2, self.dec2, self.up1, self.dec1
+
+        def _block(in_ch, out_ch):
+            return nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(out_ch),
+                nn.ReLU(inplace=True),
+            )
+
+        self.bot_proj = nn.Conv2d(c5 + global_ch + self.roi_ch, d, kernel_size=1)
+        self.s4_proj  = nn.Conv2d(c4, d, kernel_size=1)
+        self.s2_proj  = nn.Conv2d(c2, d, kernel_size=1)
+
+        self.dec5 = _block(d + d, d)
+        self.dec3 = _block(d + d, d)
+
+        self.head = nn.Conv2d(d, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos, roi=None):
+        _, s2, _, s4, x = self.backbone(local)       # /4, /16, /32
+
+        g_feat = self.global_enc(glob)
+        g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
+        if self.use_roi:
+            assert roi is not None, "use_roi=True but no roi tensor was passed to forward()"
+            roi_ctx = _crop_and_resize(roi, pos, *x.shape[2:])
+            x = torch.cat([x, g_ctx, roi_ctx], dim=1)
+        else:
+            x = torch.cat([x, g_ctx], dim=1)
+
+        x = self.bot_proj(x)                                                      # /32, d
+        x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True) # /16
+        x = self.dec5(torch.cat([x, self.s4_proj(s4)], dim=1))                    # /16
+        x = self.bot_drop(x)
+        x = F.interpolate(x, scale_factor=4, mode='bilinear', align_corners=True) # /4
+        x = self.dec3(torch.cat([x, self.s2_proj(s2)], dim=1))                    # /4
+        x = F.interpolate(x, scale_factor=4, mode='bilinear', align_corners=True) # full
+
+        main = self.head(x)
+
+        if self.training:
+            aux = F.interpolate(
+                self.aux_head(g_feat),
+                size=glob.shape[2:],
+                mode='bilinear',
+                align_corners=True,
+            )
+            return main, aux
+
+        return main
+
+
 class SSLGlobalUNet(BaseModel):
     """
     Self-supervised wrapper around _GlobalUNet for pretraining.

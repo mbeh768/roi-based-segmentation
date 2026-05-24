@@ -206,13 +206,13 @@ NOTE: regularization was incorrectly applied until experiment 4H
 
 
 
-[EXPERIMENT 5] - accepting my fate 
+[EXPERIMENT 5] - ROI 
 we must add manual ROI annotation
 to keep things fast, following preprocessing the user will annotate the global downsample quickly (supposed to be like 10s)
 so upon inference, it will ask for a mask, you put in the mask and it spits out a high res segmentation
 
-    [EXPERIMENT 5A] - validation with ROI'same
-    Trained identically to [EXPERIMENT 4G] with bottleneck dropout in the correct place
+    [EXPERIMENT 5A] - validation with ROI's
+    Trained identically to [EXPERIMENT 4G] with bottleneck dropout in the correct place and inclusion of ROI's
 
     Expected: identical results, failure, need roi augmentation
     Results: massive improvement in validation plateau, around 0.75 up from 0.55. this has merit
@@ -275,4 +275,31 @@ so upon inference, it will ask for a mask, you put in the mask and it spits out 
     if worse, the narrow decoder has lost capacity; if equal or better, proof
     that the params we cut were redundant given the ROI prior
     Results:
+
+
+    NOTE: halving decoder channels iteratively from here until validation performance
+    degrades — find the minimum viable decoder width given the ROI prior
+
+
+    [EXPERIMENT 5H] - half the decoder channels, with ROI
+    decoder_ch = 32 (half of [EXPERIMENT 5G])
+    identical to [EXPERIMENT 5G] otherwise
+
+    Expected: either matches 5G (the decoder was still overprovisioned) or starts
+    to slip, marking the capacity floor
+    Results:
+
+
+    [EXPERIMENT 5I] - half again, with ROI
+    decoder_ch = 16 (half of [EXPERIMENT 5H])
+    identical to [EXPERIMENT 5H] otherwise
+    note: _double_conv uses GroupNorm(8, ch); 16ch -> 2 per group is still fine,
+    below 8ch would break GN and need a switch to BatchNorm/LayerNorm
+
+    Expected: further params gone; either flat vs 5H (still redundant capacity)
+    or starting to hurt (approaching floor)
+    Results: No damage to performance
+    
+    I added more to the dataset here, so I will work back to this point with more data
+
 
