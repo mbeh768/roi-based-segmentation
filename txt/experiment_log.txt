@@ -303,3 +303,63 @@ so upon inference, it will ask for a mask, you put in the mask and it spits out 
     I added more to the dataset here, so I will work back to this point with more data
 
 
+
+[EXPERIMENT 6] - compressed replication of 1A→5A with expanded dataset
+after adding more annotated images to the supervised dataset, re-running the key path from
+SSL training through to the ROI result, skipping dead-ends and no-difference experiments
+decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E is confirmed
+
+    skipped experiments and reasons:
+    1A  - 1B supersedes it (geometric augs added; 1E showed no diff)
+    1E  - no discernible difference from 1D
+    2A-3B - alternative SSL schemes not carried forward
+    2C,2D,3C,3D - used SSL encoders not carried forward
+    4A,4B - 4A superseded by 4D/4G; 4B identical plateau to 4A
+    4C,4E - same result as 4D with more parameters
+    4F  - intermediate overfit-with-augs step; 4G covers what matters
+    4H  - identical failure to 4G (just more dropout)
+    5B,5C - ROI jitter experiments; not on the winning path
+
+
+    all experiments reuse saved/models/PROCESS 1B/model_best.pth (SSL encoder unchanged)
+
+    [EXPERIMENT 6A] - overfit with SSL encoder, no augmentations
+    mirrors [EXPERIMENT 1C]: PretrainedLocalGlobalUNet, PROCESS 1B checkpoint, no augs, val_split=0.0
+
+    Expected: strong overfit, verifying model can still overfit the larger dataset
+    run: python train.py -c EXPERIMENT6/EXPERIMENT_6A.json
+    Results:
+
+
+    [EXPERIMENT 6B] - overfit with SSL encoder, geometric augmentations
+    mirrors [EXPERIMENT 1D]: identical to 6A with hflip/vflip/rot90
+
+    Expected: slower overfit than 6A, consistent with 1D finding
+    run: python train.py -c EXPERIMENT6/EXPERIMENT_6B.json
+    Results:
+
+
+    [EXPERIMENT 6C] - ImageNet static encoder overfit
+    mirrors [EXPERIMENT 4D]: ImageNetPretrainedLocalGlobalUNet, static frozen, no augs, val_split=0.0
+
+    Expected: near-perfect overfit, reconfirming ImageNet >> SSL for local features
+    run: python train.py -c EXPERIMENT6/EXPERIMENT_6C.json
+    Results:
+
+
+    [EXPERIMENT 6D] - ImageNet static encoder, validation without ROI
+    mirrors [EXPERIMENT 4G]: same as 6C with augs and val_split=0.3, no ROI, bottleneck_dropout=0.1
+
+    Expected: failure to generalize, re-establishing the pre-ROI baseline with more data
+    run: python train.py -c EXPERIMENT6/EXPERIMENT_6D.json
+    Results:
+
+
+    [EXPERIMENT 6E] - ImageNet static encoder, validation with ROI
+    mirrors [EXPERIMENT 5A]: same as 6D with use_roi=true, require_roi=true
+
+    Expected: large improvement over 6D, confirming ROI benefit holds with expanded dataset
+    run: python train.py -c EXPERIMENT6/EXPERIMENT_6E.json
+    Results:
+
+

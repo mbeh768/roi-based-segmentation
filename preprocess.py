@@ -107,9 +107,11 @@ class Preprocessor:
             image = tif.asarray()
 
         if image.ndim == 2:
-            image = image[np.newaxis, :, :]   # HW -> CHW
+            image = image[np.newaxis, :, :]          # HW -> CHW
+        elif image.ndim == 3 and np.argmin(image.shape) == 2:
+            image = np.transpose(image, (2, 0, 1))   # HWC -> CHW
 
-        return image                           # CHW original dtype
+        return image                                  # CHW original dtype
 
     def _load_czi(self, path, scene_index=0):
         '''Load CZI image as CHW array, zoomed so pixel count doesn't exceed czi_max_px.
