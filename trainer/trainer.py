@@ -35,6 +35,15 @@ class Trainer(BaseTrainer):
 
         self.aux_loss_weight = config['trainer'].get('aux_loss_weight', 0.0)
 
+        dl_args = config['data_loader']['args']
+        self._roi_distort_start    = dl_args.get('roi_distort_strength', 0.0)
+        self._roi_distort_end      = dl_args.get('roi_distort_end', self._roi_distort_start)
+        self._roi_distort_ramp_ep  = dl_args.get('roi_distort_ramp_epochs', 0)
+
+        self._roi_dropout_start    = dl_args.get('roi_dropout', 0.0)
+        self._roi_dropout_end      = dl_args.get('roi_dropout_end', self._roi_dropout_start)
+        self._roi_dropout_ramp_ep  = dl_args.get('roi_dropout_ramp_epochs', 0)
+
         train_keys = ['loss', 'main_loss'] if self.aux_loss_weight > 0 else ['loss']
         self.train_metrics = MetricTracker(*train_keys, *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
@@ -115,6 +124,19 @@ class Trainer(BaseTrainer):
         """
         self.model.train()
         self.train_metrics.reset()
+
+        if self._roi_distort_ramp_ep > 0:
+            t = min((epoch - 1) / self._roi_distort_ramp_ep, 1.0)
+            self.data_loader.dataset.roi_distort_strength = (
+                self._roi_distort_start + t * (self._roi_distort_end - self._roi_distort_start)
+            )
+
+        if self._roi_dropout_ramp_ep > 0:
+            t = min((epoch - 1) / self._roi_dropout_ramp_ep, 1.0)
+            self.data_loader.dataset.roi_dropout = (
+                self._roi_dropout_start + t * (self._roi_dropout_end - self._roi_dropout_start)
+            )
+
         for batch_idx, batch in enumerate(self.data_loader):
             # 5-element batches (LocalGlobalDataset): (local, glob, pos, mask, global_mask)
             # 2-element batches (GlobalDataset / LocalDataset): (image, mask)

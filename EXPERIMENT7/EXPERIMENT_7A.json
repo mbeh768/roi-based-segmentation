@@ -64,7 +64,7 @@
         "save_period": 25,
         "verbosity": 2,
         "monitor": "min val_loss",
-        "early_stop": 100,
+        "early_stop": 50,
         "tensorboard": true,
         "aux_loss_weight": 0.0
     }

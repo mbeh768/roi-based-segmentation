@@ -151,11 +151,23 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         logits = model(*model_args)                               # (N, 1, tile_H, tile_W)
     probs_tiles = torch.sigmoid(logits).squeeze(1).cpu()           # (N, tile_H, tile_W)
 
+    dl_args = (config or {}).get('data_loader', {}).get('args', {})
+    if roi is not None and dl_args.get('roi_exclusion', False):
+        radius = dl_args.get('roi_exclusion_radius', 0.05)
+        roi_bin = (roi.squeeze(0).numpy() > 0.5).astype(np.uint8)
+        H_roi, W_roi = roi_bin.shape
+        dist = cv2.distanceTransform(1 - roi_bin, cv2.DIST_L2, 5)
+        threshold_roi_px = radius * min(H, W) * (H_roi / H)
+        for i, (ty, tx) in enumerate([(y, x) for y in ys for x in xs]):
+            cy_roi = int(np.clip((ty + tile_size / 2) / H * H_roi, 0, H_roi - 1))
+            cx_roi = int(np.clip((tx + tile_size / 2) / W * W_roi, 0, W_roi - 1))
+            if dist[cy_roi, cx_roi] > threshold_roi_px:
+                probs_tiles[i] = 0.0
+
     prob_map = stitch(list(probs_tiles), ys, xs, H, W, tile_size, stride)
     pred_map = (prob_map > threshold).float()
 
     # ── figure ───────────────────────────────────────────────────────────────
-    import numpy as np
     panels = [('input', None), ('prob', None), ('pred', None)]
     if roi is not None:
         panels.insert(1, ('roi', None))

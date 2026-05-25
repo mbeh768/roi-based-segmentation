@@ -155,7 +155,8 @@ class LocalGlobalDataset(Dataset):
     """
     def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0,
                  require_roi=False, roi_jitter=0.0,
-                 roi_dropout=0.0, roi_distort=0.0, roi_distort_strength=0.3):
+                 roi_dropout=0.0, roi_distort=0.0, roi_distort_strength=0.3,
+                 roi_exclusion=False, roi_exclusion_radius=0.05):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
@@ -166,6 +167,8 @@ class LocalGlobalDataset(Dataset):
         self.roi_dropout = roi_dropout
         self.roi_distort = roi_distort
         self.roi_distort_strength = roi_distort_strength
+        self.roi_exclusion = roi_exclusion
+        self.roi_exclusion_radius = roi_exclusion_radius
 
         # Photometric — applied to local only (add blur, erasure, etc. here)
         self.photo_transform = None
@@ -189,6 +192,46 @@ class LocalGlobalDataset(Dataset):
                 self.stem_to_roi[stem] = roi_path
 
         assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
+
+        if self.roi_exclusion:
+            assert self.require_roi, "roi_exclusion requires require_roi=True"
+            self._filter_by_roi_exclusion()
+
+        assert len(self.items) > 0, "No tiles remain after roi_exclusion filtering"
+
+    def _filter_by_roi_exclusion(self):
+        import cv2
+        stem_dist = {}
+        for stem, roi_path in self.stem_to_roi.items():
+            roi = torch.load(roi_path, weights_only=True).squeeze(0).numpy()
+            roi_bin = (roi > 0.5).astype(np.uint8)
+            H_roi, W_roi = roi.shape
+            if roi_bin.max() == 0:
+                stem_dist[stem] = None
+            else:
+                dist = cv2.distanceTransform(1 - roi_bin, cv2.DIST_L2, 5)
+                stem_dist[stem] = (dist, H_roi, W_roi)
+
+        kept = []
+        for item in self.items:
+            _, stem, entry = item
+            if stem not in stem_dist or stem_dist[stem] is None:
+                kept.append(item)
+                continue
+            dist, H_roi, W_roi = stem_dist[stem]
+            image_H, image_W = entry['image_H'], entry['image_W']
+            y, x = entry['y'], entry['x']
+            h, w = entry['height'], entry['width']
+            cy_roi = int(np.clip((y + h / 2) / image_H * H_roi, 0, H_roi - 1))
+            cx_roi = int(np.clip((x + w / 2) / image_W * W_roi, 0, W_roi - 1))
+            threshold_roi_px = self.roi_exclusion_radius * min(image_H, image_W) * (H_roi / image_H)
+            if dist[cy_roi, cx_roi] <= threshold_roi_px:
+                kept.append(item)
+
+        n_before = len(self.items)
+        self.items = kept
+        print(f"[LocalGlobalDataset] ROI exclusion: kept {len(self.items)}/{n_before} tiles "
+              f"(radius={self.roi_exclusion_radius*100:.1f}% of image min-dim)")
 
     def __len__(self):
         return len(self.items)
