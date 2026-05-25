@@ -9,6 +9,23 @@ import torchvision.transforms as T
 from torch.utils.data import Dataset
 
 
+def _roi_grid_distort(roi, num_steps=5, strength=0.3):
+    """Random grid distortion on a (1, H, W) ROI tensor. Decouples ROI from anatomy
+    so the model can't memorize a pixel-perfect template."""
+    _, H, W = roi.shape
+    yy, xx = torch.meshgrid(torch.linspace(-1, 1, H), torch.linspace(-1, 1, W),
+                            indexing='ij')
+    base = torch.stack([xx, yy], dim=-1)  # (H, W, 2)
+    cp = torch.randn(2, num_steps, num_steps) * strength
+    cp_up = F.interpolate(cp.unsqueeze(0), size=(H, W),
+                          mode='bilinear', align_corners=True).squeeze(0)
+    base[..., 0] = base[..., 0] + cp_up[0]
+    base[..., 1] = base[..., 1] + cp_up[1]
+    out = F.grid_sample(roi.unsqueeze(0), base.unsqueeze(0), mode='nearest',
+                        padding_mode='border', align_corners=True).squeeze(0)
+    return out
+
+
 def _sample_geo_params(flags):
     """Sample a per-view geometric aug as (hflip, vflip, k)."""
     hflip = 1 if random.random() < flags.get('hflip', 0.0) else 0
@@ -137,7 +154,8 @@ class LocalGlobalDataset(Dataset):
     the other tensors.
     """
     def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0,
-                 require_roi=False, roi_jitter=0.0):
+                 require_roi=False, roi_jitter=0.0,
+                 roi_dropout=0.0, roi_distort=0.0, roi_distort_strength=0.3):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
@@ -145,6 +163,9 @@ class LocalGlobalDataset(Dataset):
         self.augment = any(v > 0 for v in self.aug_flags.values())
         self.require_roi = require_roi
         self.roi_jitter = roi_jitter
+        self.roi_dropout = roi_dropout
+        self.roi_distort = roi_distort
+        self.roi_distort_strength = roi_distort_strength
 
         # Photometric — applied to local only (add blur, erasure, etc. here)
         self.photo_transform = None
@@ -199,6 +220,10 @@ class LocalGlobalDataset(Dataset):
             roi = torch.load(self.stem_to_roi[stem], weights_only=True)
             if self.roi_jitter > 0 and random.random() < self.roi_jitter:
                 roi = torch.ones_like(roi)
+            if self.roi_dropout > 0 and random.random() < self.roi_dropout:
+                roi = torch.zeros_like(roi)
+            if self.roi_distort > 0 and random.random() < self.roi_distort:
+                roi = _roi_grid_distort(roi, strength=self.roi_distort_strength)
 
         if self.augment:
             if roi is not None:

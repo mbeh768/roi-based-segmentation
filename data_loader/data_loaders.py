@@ -66,10 +66,13 @@ class LocalGlobalDataLoader(BaseDataLoader):
                  num_workers=1, visualize=None,
                  hflip=0.0, vflip=0.0, rot90=0.0,
                  fg_ratio=0.0, fg_min=0.05,
-                 require_roi=False, roi_jitter=0.0):
+                 require_roi=False, roi_jitter=0.0,
+                 roi_dropout=0.0, roi_distort=0.0, roi_distort_strength=0.3):
         self.dataset = LocalGlobalDataset(
             data_dir, hflip=hflip, vflip=vflip, rot90=rot90,
             require_roi=require_roi, roi_jitter=roi_jitter,
+            roi_dropout=roi_dropout, roi_distort=roi_distort,
+            roi_distort_strength=roi_distort_strength,
         )
         if visualize:
             self.dataset.save_visualizations(visualize)

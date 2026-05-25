@@ -136,6 +136,7 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
     pos_batch = torch.stack(pos_list).to(device)                   # (N, 4)
 
     model_args = [local_batch, glob_batch, pos_batch]
+    roi = None
     if getattr(model, 'use_roi', False):
         roi = _resolve_roi(roi_path, img_path, config)
         if roi is None:
@@ -155,18 +156,28 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
 
     # ── figure ───────────────────────────────────────────────────────────────
     import numpy as np
-    n_cols = 4 if mask_stitched is not None else 3
+    panels = [('input', None), ('prob', None), ('pred', None)]
+    if roi is not None:
+        panels.insert(1, ('roi', None))
+    if mask_stitched is not None:
+        panels.append(('gt', None))
+    n_cols = len(panels)
     fig, axes = plt.subplots(1, n_cols, figsize=(4 * n_cols, 4))
     fig.suptitle(title)
+    ax_by = dict(zip([k for k, _ in panels], axes))
 
-    axes[0].imshow(to_display(torch.from_numpy(full_arr)))
-    axes[0].set_title('Input')
+    ax_by['input'].imshow(to_display(torch.from_numpy(full_arr)))
+    ax_by['input'].set_title('Input')
 
-    axes[1].imshow(prob_map.numpy(), cmap='hot', vmin=0, vmax=1)
-    axes[1].set_title('Probability')
+    if 'roi' in ax_by:
+        ax_by['roi'].imshow(roi.squeeze(0).cpu().numpy(), cmap='gray', vmin=0, vmax=1)
+        ax_by['roi'].set_title('ROI (model input)')
 
-    axes[2].imshow(pred_map.numpy(), cmap='gray', vmin=0, vmax=1)
-    axes[2].set_title(f'Prediction (t={threshold})')
+    ax_by['prob'].imshow(prob_map.numpy(), cmap='hot', vmin=0, vmax=1)
+    ax_by['prob'].set_title('Probability')
+
+    ax_by['pred'].imshow(pred_map.numpy(), cmap='gray', vmin=0, vmax=1)
+    ax_by['pred'].set_title(f'Prediction (t={threshold})')
 
     if mask_stitched is not None:
         eps = 1e-6
@@ -175,8 +186,8 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         iou_val = ((intersection + eps) / (union + eps)).item()
         acc_val = (pred_map == mask_stitched).float().mean().item()
 
-        axes[3].imshow(mask_stitched.numpy(), cmap='gray', vmin=0, vmax=1)
-        axes[3].set_title(f'GT  |  IoU={iou_val:.3f}  Acc={acc_val:.3f}')
+        ax_by['gt'].imshow(mask_stitched.numpy(), cmap='gray', vmin=0, vmax=1)
+        ax_by['gt'].set_title(f'GT  |  IoU={iou_val:.3f}  Acc={acc_val:.3f}')
 
     for ax in axes:
         ax.axis('off')
@@ -203,14 +214,21 @@ def main(args):
     p = Preprocessor(raw_config)
 
     if args.dataset_pairs:
+        if args.roi is not None:
+            print('WARNING: --roi is ignored in --dataset-pairs mode; '
+                  'per-image ROIs are auto-resolved from data_dir/images/<stem>/roi_<stem>.pt')
         image_paths, mask_paths = p.find_source_filepaths()
         pairs = list(zip(image_paths, mask_paths))
         random.shuffle(pairs)
         print(f"Found {len(pairs)} image/mask pairs")
+        uses_roi = getattr(model, 'use_roi', False)
         for i, (img_path, mask_path) in enumerate(pairs):
+            if uses_roi and _resolve_roi(None, img_path, raw_config) is None:
+                print(f"  [{i+1}/{len(pairs)}] {img_path.name}: no ROI found — skipping")
+                continue
             title = f"{img_path.name}  [{i+1}/{len(pairs)}]"
             run_one(img_path, mask_path, model, device, p, args.threshold, title,
-                    args.output, roi_path=args.roi, config=raw_config)
+                    args.output, roi_path=None, config=raw_config)
     else:
         img_path  = Path(args.image)
         mask_path = Path(args.mask) if args.mask else None
