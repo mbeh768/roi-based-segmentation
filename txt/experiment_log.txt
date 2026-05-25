@@ -371,7 +371,7 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
     mirrors [EXPERIMENT 6E]: same setup + roi_dropout=0.25 (zero the ROI on 25% of training samples)
 
     Expected: validation IoU stabilizes; model is forced to make predictions from anatomy when ROI is absent, breaking pure-template reliance
-    run: python train.py -c EXPERIMENT7/EXPERIMENT_7A.json
+    run: python3 train.py -c EXPERIMENT7/EXPERIMENT_7A.json
     Results:
 
 
@@ -379,7 +379,12 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
     mirrors [EXPERIMENT 6E]: same setup + roi_distort=0.5, roi_distort_strength=0.3 (random grid warp applied to ROI only, on 50% of training samples)
 
     Expected: validation IoU stabilizes; ROI provides a soft spatial prior rather than a copy-template, so small ROI imprecision at inference no longer collapses performance
-    run: python train.py -c EXPERIMENT7/EXPERIMENT_7B.json
+    run: python3 train.py -c EXPERIMENT7/EXPERIMENT_7B.json
     Results:
 
+    [EXPERIMENT 7C] - Do not include tiles that are not within 5% image min dimension of the ROI
+    Remove foreground reinforcement, otherwise identical to EXPERIMENT_6E
 
+    Expected: This should help massively in helping the user clearly define where segmentation must occur and where it should
+    not, taking high impact, low information decisions away form the machine and giving it to the user, which can employ clinical
+    knowledge the machine isnt capable of resonining with

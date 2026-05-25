@@ -170,8 +170,12 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
     ax_by['input'].set_title('Input')
 
     if 'roi' in ax_by:
-        ax_by['roi'].imshow(roi.squeeze(0).cpu().numpy(), cmap='gray', vmin=0, vmax=1)
-        ax_by['roi'].set_title('ROI (model input)')
+        roi_np = roi.squeeze(0).cpu().numpy()
+        roi_up = cv2.resize(roi_np, (W, H), interpolation=cv2.INTER_NEAREST)
+        input_rgb = to_display(torch.from_numpy(full_arr))
+        ax_by['roi'].imshow(input_rgb)
+        ax_by['roi'].imshow(roi_up, cmap='Oranges', alpha=0.4, vmin=0, vmax=1)
+        ax_by['roi'].set_title(f'ROI overlay  ({roi_np.shape[0]}x{roi_np.shape[1]} → {H}x{W})')
 
     ax_by['prob'].imshow(prob_map.numpy(), cmap='hot', vmin=0, vmax=1)
     ax_by['prob'].set_title('Probability')
