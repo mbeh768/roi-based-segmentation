@@ -328,7 +328,7 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
 
     Expected: strong overfit, verifying model can still overfit the larger dataset
     run: python train.py -c EXPERIMENT6/EXPERIMENT_6A.json
-    Results:
+    Results: works great, strong overfit after several hundred epochs
 
 
     [EXPERIMENT 6B] - overfit with SSL encoder, geometric augmentations
@@ -336,7 +336,7 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
 
     Expected: slower overfit than 6A, consistent with 1D finding
     run: python train.py -c EXPERIMENT6/EXPERIMENT_6B.json
-    Results:
+    Results: correct expected, more than 800 epochs needed for <95% iou
 
 
     [EXPERIMENT 6C] - ImageNet static encoder overfit
@@ -344,7 +344,7 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
 
     Expected: near-perfect overfit, reconfirming ImageNet >> SSL for local features
     run: python train.py -c EXPERIMENT6/EXPERIMENT_6C.json
-    Results:
+    Results: very fast overfit, faster than 6A
 
 
     [EXPERIMENT 6D] - ImageNet static encoder, validation without ROI
@@ -352,14 +352,34 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
 
     Expected: failure to generalize, re-establishing the pre-ROI baseline with more data
     run: python train.py -c EXPERIMENT6/EXPERIMENT_6D.json
-    Results:
+    Results: failure to generalzie, consistent
 
 
     [EXPERIMENT 6E] - ImageNet static encoder, validation with ROI
-    mirrors [EXPERIMENT 5A]: same as 6D with use_roi=true, require_roi=true
+    mirrors [EXPERIMENT 5A]: same as 6D with use_roi=true, require_roi=true, used detailed roi's (brush tool) instead of tile-wise masking
 
     Expected: large improvement over 6D, confirming ROI benefit holds with expanded dataset
     run: python train.py -c EXPERIMENT6/EXPERIMENT_6E.json
+    Results: Better results than ever before, all these epxeriments notably had very high validation accuraccy which suggests foreground
+    reinforcement may be needed to have a good metric for early stop, validaiton iou with the detailed ROI's was much more variable
+    than with the tile-wise, suggesting model is overly reliant on ROI for decision making
+
+
+---- ROI Augmentation: breaking pixel-perfect ROI dependence ---
+
+    [EXPERIMENT 7A] - ROI dropout
+    mirrors [EXPERIMENT 6E]: same setup + roi_dropout=0.25 (zero the ROI on 25% of training samples)
+
+    Expected: validation IoU stabilizes; model is forced to make predictions from anatomy when ROI is absent, breaking pure-template reliance
+    run: python train.py -c EXPERIMENT7/EXPERIMENT_7A.json
+    Results:
+
+
+    [EXPERIMENT 7B] - ROI grid distortion
+    mirrors [EXPERIMENT 6E]: same setup + roi_distort=0.5, roi_distort_strength=0.3 (random grid warp applied to ROI only, on 50% of training samples)
+
+    Expected: validation IoU stabilizes; ROI provides a soft spatial prior rather than a copy-template, so small ROI imprecision at inference no longer collapses performance
+    run: python train.py -c EXPERIMENT7/EXPERIMENT_7B.json
     Results:
 
 
