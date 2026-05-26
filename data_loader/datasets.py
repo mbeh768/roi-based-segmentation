@@ -248,7 +248,14 @@ class LocalGlobalDataset(Dataset):
         H, W = entry['image_H'], entry['image_W']
         y, x = entry['y'], entry['x']
         h, w = entry['height'], entry['width']
-        pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
+        # pos must describe the full context window the local patch spans, not the
+        # inner tile — the model bottleneck encodes the whole context patch, so the
+        # global/ROI crop has to register against that same extent. Reduces to the
+        # inner tile when context_size == tile_size.
+        ctx = entry.get('context_size', w)
+        pad = (ctx - w) // 2
+        cy, cx = y - pad, x - pad
+        pos = torch.tensor([cy / H, cx / W, (cy + ctx) / H, (cx + ctx) / W], dtype=torch.float32)
 
         mask_path = self.mask_dir / stem / patch_path.name
         if mask_path.exists():

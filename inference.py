@@ -145,8 +145,14 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
     local_batch = torch.stack(tiles).to(device)                    # (N, 3, tile_H, tile_W)
     glob_batch  = glob.unsqueeze(0).expand(N, -1, -1, -1).to(device)  # (N, 3, gH, gW)
 
+    # pos spans the full context window (matches LocalGlobalDataset); reduces to
+    # the inner tile when context_size == tile_size.
+    context_size = p.c['preprocess'].get('context_size', tile_size)
+    pad = (context_size - tile_size) // 2
     pos_list = [
-        torch.tensor([y / H, x / W, (y + tile_size) / H, (x + tile_size) / W], dtype=torch.float32)
+        torch.tensor([(y - pad) / H, (x - pad) / W,
+                      (y - pad + context_size) / H, (x - pad + context_size) / W],
+                     dtype=torch.float32)
         for y in ys for x in xs
     ]
     pos_batch = torch.stack(pos_list).to(device)                   # (N, 4)

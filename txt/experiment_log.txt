@@ -474,7 +474,7 @@ these experiments augment model input rather than hyperparameters
 
     Expected: indistinguishable from 7J
     run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8A.json
-    Results:
+    Results: virtually identical, you could nitpick but they are the same
 
 
     [EXPERIMENT 8B] - 512x512 context tile, 256x256 inner loss region
@@ -485,5 +485,5 @@ these experiments augment model input rather than hyperparameters
 
     Expected: cleaner tile-boundary segmentations and a measurable reduction in the edge artifacts
     visible qualitatively in 7J. Validation IoU should be on par or better than 7J.
-    run: python3 preprocess.py -c EXPERIMENT8/EXPERIMENT_8B.json  &&  python3 train.py -c EXPERIMENT8/EXPERIMENT_8B.json
+    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8B.json
     Results:
