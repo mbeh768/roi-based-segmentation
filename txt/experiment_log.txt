@@ -486,4 +486,8 @@ these experiments augment model input rather than hyperparameters
     Expected: cleaner tile-boundary segmentations and a measurable reduction in the edge artifacts
     visible qualitatively in 7J. Validation IoU should be on par or better than 7J.
     run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8B.json
-    Results:
+    Results: best results yet, trained for 465 epochs meaning validation improved over 415, which is over double what previous method attained, very good. 
+    I realize this is kind of cheating just giving it more context but the improvment isnt staggering and benefits immensley from global context, so i think its relevant to the experiment sequence.
+
+    LOOOK AT THESE RESULTS QUALITATIVLEY, TRY K FOLD VALIDATION, MAKE LIKE 5 ROIs per image, INTELLIGENT DOWNSAMPLING FOR GLOBAL
+
