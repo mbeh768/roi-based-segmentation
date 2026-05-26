@@ -456,4 +456,5 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
     Expected: more tiles retained near ROI boundary than 7I; validation performance should match or exceed 7I
     with similar stability gains
     run: python3 train.py -c EXPERIMENT7/EXPERIMENT_7J.json
-    Results:
+    Results: closer coorelation of trianing and validation, even a possible small bump in validation iou, not sure why that woudl be if anything i would expect a small decrease in performance
+    Qualitative examination: 

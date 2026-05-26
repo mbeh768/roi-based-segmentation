@@ -86,7 +86,7 @@ class BaseTrainer:
                 if improved:
                     self.mnt_best = log[self.mnt_metric]
                     not_improved_count = 0
-                    best = True
+                    self._save_checkpoint(epoch, save_best=True)
                 else:
                     not_improved_count += 1
 
@@ -96,7 +96,7 @@ class BaseTrainer:
                     break
 
             if epoch % self.save_period == 0:
-                self._save_checkpoint(epoch, save_best=best)
+                self._save_checkpoint(epoch, save_best=False)
 
         self._save_epoch_plots()
 
