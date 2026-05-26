@@ -486,8 +486,42 @@ these experiments augment model input rather than hyperparameters
     Expected: cleaner tile-boundary segmentations and a measurable reduction in the edge artifacts
     visible qualitatively in 7J. Validation IoU should be on par or better than 7J.
     run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8B.json
-    Results: best results yet, trained for 465 epochs meaning validation improved over 415, which is over double what previous method attained, very good. 
-    I realize this is kind of cheating just giving it more context but the improvment isnt staggering and benefits immensley from global context, so i think its relevant to the experiment sequence.
+    Results: on the iou graph it is about the same but qualitativley these results are much much better, probably usable
+    does phenomenal for all but the FL_22P003-6 samples, even then only rv has big issues, these must have the 4th channel, will annotate more to help and add augmentations, imagenet should be robust to these variations but i suspect not perfectly
 
-    LOOOK AT THESE RESULTS QUALITATIVLEY, TRY K FOLD VALIDATION, MAKE LIKE 5 ROIs per image, INTELLIGENT DOWNSAMPLING FOR GLOBAL
+
+    [EXPERIMENT 8C] - learned downsampling, UNet model
+    the 256x256 input for the global unet will be changed to a 1024x1024 input, everything else stays the same, preprocess and ssl training are repeated
+
+    Expected: superior performance overall, this is at the cost of increase parameters and compute, parameters shouldnt be an issue due to size of ssl dataset
+    Results:
+
+
+    [EXPERIMENT 8D] - learned downsampling, standard CNN
+    This is distinct from experiment 8C in that there is no bottleneck, features go straight from 1024->256
+
+    Expected: inferior performance, to 8C and the old unet, resolution isnt so important as far spatial relationships
+    Results:
+
+
+    [EXPERIMENT 8E] - multiple ROI's
+    in addition to current roi's, procure 3 more per image, this is not very scientific with only one person, possibly have dr hillestad do some to gauge r&r
+    the hope is that this will accomplish what roi augmentation experiments failed to acheive and will more accuratley simulate operator error
+
+    Expected: slightly better performance due to ability to "think around" roi limitations, not that the model is showing struggle with this right now, but worth trying
+    Results:
+
+
+    [EXPERIMENT 8F] - Reinforcing the imaginary boundary
+    The user will mark tiles containing the imaginary boundary on rv as "hard regions" that the model will be penalized 3x loss for messing up, hopefully this teaches it to trust roi more here
+
+    Expected: better performance on imaginary boundaries at no expense to other segmentation
+    Results:
+
+
+    [EXPERIMENT 8G] - 1 in k validation with separate test set for eval
+    this just aims to better leverage labeled data by cycling images between training and val, obviously to truly test performance a test set will be pulled from whatever wasnt used in ssl
+
+    Expected:
+    Results:
 
