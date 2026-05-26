@@ -57,10 +57,15 @@ def to_display(tensor):
 
 
 def tif_to_tiles(path, p, is_mask=False):
-    """Load TIFF at tiling_size resolution and cut into tile_size patches."""
-    tile_size   = p.c['preprocess']['tile_size']
-    stride      = p.c['preprocess']['stride']
-    tiling_size = p.c['preprocess']['tiling_size']
+    """Load TIFF at tiling_size resolution and cut into tiles.
+
+    Image tiles are extracted at context_size (centered on the inner tile_size region);
+    mask tiles at tile_size. Sampling that runs off the canvas is zero-padded.
+    """
+    tile_size    = p.c['preprocess']['tile_size']
+    stride       = p.c['preprocess']['stride']
+    tiling_size  = p.c['preprocess']['tiling_size']
+    context_size = p.c['preprocess'].get('context_size', tile_size)
 
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
     imagenet_norm = p.c['preprocess'].get('imagenet_norm', False)
@@ -72,6 +77,10 @@ def tif_to_tiles(path, p, is_mask=False):
 
     img_hwc = np.transpose(arr, (1, 2, 0))
     H, W = img_hwc.shape[:2]
+    C = img_hwc.shape[2]
+
+    save_size = tile_size if is_mask else context_size
+    pad = (save_size - tile_size) // 2
 
     ys = list(range(0, H - tile_size + 1, stride))
     xs = list(range(0, W - tile_size + 1, stride))
@@ -79,8 +88,15 @@ def tif_to_tiles(path, p, is_mask=False):
     tiles = []
     for y in ys:
         for x in xs:
-            patch = img_hwc[y:y+tile_size, x:x+tile_size]
-            tiles.append(torch.from_numpy(np.transpose(patch, (2, 0, 1)).copy()))
+            cy, cx = y - pad, x - pad
+            patch_hwc = np.zeros((save_size, save_size, C), dtype=np.float32)
+            src_y0 = max(0, cy);  src_y1 = min(H, cy + save_size)
+            src_x0 = max(0, cx);  src_x1 = min(W, cx + save_size)
+            dst_y0 = src_y0 - cy; dst_y1 = src_y1 - cy
+            dst_x0 = src_x0 - cx; dst_x1 = src_x1 - cx
+            if src_y1 > src_y0 and src_x1 > src_x0:
+                patch_hwc[dst_y0:dst_y1, dst_x0:dst_x1] = img_hwc[src_y0:src_y1, src_x0:src_x1]
+            tiles.append(torch.from_numpy(np.transpose(patch_hwc, (2, 0, 1)).copy()))
 
     return tiles, ys, xs, H, W, tile_size, stride, arr
 
@@ -148,8 +164,15 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         model_args.append(roi_batch)
 
     with torch.no_grad():
-        logits = model(*model_args)                               # (N, 1, tile_H, tile_W)
-    probs_tiles = torch.sigmoid(logits).squeeze(1).cpu()           # (N, tile_H, tile_W)
+        logits = model(*model_args)                               # (N, 1, ctx_H, ctx_W)
+    probs_tiles = torch.sigmoid(logits).squeeze(1).cpu()           # (N, ctx_H, ctx_W)
+
+    # If the model saw a context patch larger than the stitch tile, crop predictions
+    # back to the centered tile_size region before stitching.
+    if probs_tiles.shape[-1] != tile_size:
+        cs = probs_tiles.shape[-1]
+        off = (cs - tile_size) // 2
+        probs_tiles = probs_tiles[..., off:off + tile_size, off:off + tile_size]
 
     dl_args = (config or {}).get('data_loader', {}).get('args', {})
     if roi is not None and dl_args.get('roi_exclusion', False):

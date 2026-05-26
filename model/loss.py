@@ -4,8 +4,7 @@ import torch.nn.functional as F
 
 def _crop_to_target(output, target):
     """If output is spatially larger than target, center-crop output to match.
-    Used when the model sees an extra context region but loss is computed on
-    the inner region only."""
+    Lets the model see a context window wider than the loss/stitch region."""
     if output.shape[-2:] == target.shape[-2:]:
         return output
     oh, ow = output.shape[-2:]
@@ -16,18 +15,12 @@ def _crop_to_target(output, target):
 
 
 def bce(output, target):
-    output = _crop_to_target(output, target)
-    valid = target >= 0
-    if valid.all():
-        return F.binary_cross_entropy_with_logits(output, target)
-    return F.binary_cross_entropy_with_logits(output[valid], target[valid])
+    return F.binary_cross_entropy_with_logits(_crop_to_target(output, target), target)
 
 
 def dice_loss(output, target, eps=1e-6):
     output = _crop_to_target(output, target)
-    valid = (target >= 0).to(output.dtype)
-    probs = torch.sigmoid(output) * valid
-    target = target.clamp(min=0) * valid
+    probs = torch.sigmoid(output)
 
     dims = (1, 2, 3)    # compute per image, then average over batch
     intersection = (probs * target).sum(dims)
@@ -38,11 +31,7 @@ def dice_loss(output, target, eps=1e-6):
 
 
 def bce_dice(output, target, a=0.3):
-    """
-    Combined Dice loss and Binary Cross Entropy loss.
-    output: logits, shape (B, 1, H, W) or (B, 1, Hc, Wc) where Hc>=H, Wc>=W (context > inner).
-    target: binary mask, shape (B, 1, H, W). Pixels with target == -1 are ignored.
-    """
+    """Combined BCE + Dice. Output may be larger than target (center-cropped automatically)."""
     return a * bce(output, target) + (1 - a) * dice_loss(output, target)
 
 

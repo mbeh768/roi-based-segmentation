@@ -467,14 +467,23 @@ these experiments augment model input rather than hyperparameters
     they're implicitly coupled through tiling_size + global path, which limits the range of
     tile/context configurations we can test cleanly
 
-    [EXPERIMENT 8A] - 512x512 context tile, 256x256 inner loss region
+    [EXPERIMENT 8A] - regression check: clone of 7J on the refactored preprocess/loss/metric path
+    config identical to 7J (tile_size=256, no context expansion). Verifies the new context-aware
+    code paths (center-crop in loss/metrics, generalized save_local) reproduce 7J behavior when
+    context_size == tile_size.
+
+    Expected: indistinguishable from 7J
+    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8A.json
+    Results:
+
+
+    [EXPERIMENT 8B] - 512x512 context tile, 256x256 inner loss region
     model sees a 512x512 patch but loss is only computed on the centered 256x256 inner region.
     edges of the tile contribute context but not gradient, so bad predictions at tile boundaries
     cannot pollute the loss. inference stitches only the inner 256x256 of each prediction.
-    when the 512x512 context extends outside the image, OOB pixels are written as -1 in both
-    image and mask so the model can distinguish padding from genuine background.
+    sampling that runs off the canvas is zero-padded (same as genuine background).
 
     Expected: cleaner tile-boundary segmentations and a measurable reduction in the edge artifacts
     visible qualitatively in 7J. Validation IoU should be on par or better than 7J.
-    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8A.json
+    run: python3 preprocess.py -c EXPERIMENT8/EXPERIMENT_8B.json  &&  python3 train.py -c EXPERIMENT8/EXPERIMENT_8B.json
     Results:
