@@ -457,4 +457,24 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
     with similar stability gains
     run: python3 train.py -c EXPERIMENT7/EXPERIMENT_7J.json
     Results: closer coorelation of trianing and validation, even a possible small bump in validation iou, not sure why that woudl be if anything i would expect a small decrease in performance
-    Qualitative examination: 
+    Qualitative examination (no model_best.pth so using 50=early stop epochs back from best): good segmentation outcomes, glaring errors are the artifiican line on RV and tile edges
+
+
+[EXPERIMENT 8] - data feeding
+these experiments augment model input rather than hyperparameters
+
+    [TODO] - decouple tile_size from global_downsample size in preprocessing/architecture; right now
+    they're implicitly coupled through tiling_size + global path, which limits the range of
+    tile/context configurations we can test cleanly
+
+    [EXPERIMENT 8A] - 512x512 context tile, 256x256 inner loss region
+    model sees a 512x512 patch but loss is only computed on the centered 256x256 inner region.
+    edges of the tile contribute context but not gradient, so bad predictions at tile boundaries
+    cannot pollute the loss. inference stitches only the inner 256x256 of each prediction.
+    when the 512x512 context extends outside the image, OOB pixels are written as -1 in both
+    image and mask so the model can distinguish padding from genuine background.
+
+    Expected: cleaner tile-boundary segmentations and a measurable reduction in the edge artifacts
+    visible qualitatively in 7J. Validation IoU should be on par or better than 7J.
+    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8A.json
+    Results:

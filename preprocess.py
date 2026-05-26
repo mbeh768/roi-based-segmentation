@@ -164,7 +164,7 @@ class Preprocessor:
 
         return data                                        # CHW original dtype
 
-    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None, imagenet_norm=False, scene_index=0):
+    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None, imagenet_norm=False, scene_index=0, return_valid_bounds=False):
         '''
         Load an image or mask, resize to a square, normalize to float32 [0, 1],
         optionally standardize channels per-channel, zero-pad to square.
@@ -226,6 +226,7 @@ class Preprocessor:
         scale = _target / max(H, W)
         new_W, new_H = int(W * scale), int(H * scale)
         image = cv2.resize(image, dsize=(new_W, new_H), interpolation=interpolation)
+        valid_H, valid_W = new_H, new_W   # zero-pad area below/right of this is OOB
 
         # cv2 may squeeze single-channel to HW
         if image.ndim == 2:
@@ -303,39 +304,72 @@ class Preprocessor:
         out_dir.mkdir(parents=True, exist_ok=True)
         torch.save(tensor, out_dir / 'global.pt')
 
-    def save_local(self, image, stem, subdir, dry_run=False):
+    def save_local(self, image, stem, subdir, dry_run=False, valid_H=None, valid_W=None):
         '''
-        Extract tile_size x tile_size patches from a CHW float32 image (already loaded
-        at tiling_size resolution) and save each as a .pt file.
+        Extract patches from a CHW float32 image (already loaded at tiling_size
+        resolution) and save each as a .pt file.
 
-        Patches saved to:  data_dir/<subdir>/local/<stem>/patch_YYYY_XXXX.pt
-        Coordinates saved: data_dir/<subdir>/local/<stem>/coordinates.json
+        Two-size tiling (when context_size > tile_size):
+            * tile_size  — the inner region the loss is computed on (also the stitch stride target)
+            * context_size — the full patch the model sees; centered on the inner region.
+              Pixels of the context patch falling outside the valid image area are written as -1
+              to distinguish out-of-bounds from genuine background.
+
+        Backward compat: if context_size is missing or equals tile_size, behavior matches the
+        original (single-size) tiling.
+
+        Patches saved to:  data_dir/<subdir>/<stem>/patch_YYYY_XXXX.pt
+        Coordinates saved: data_dir/<subdir>/<stem>/coordinates.json
 
         Args:
             image (np.ndarray): CHW float32, spatial dims should match tiling_size
             stem (str): source image stem (used as subfolder name)
             subdir (str): 'images' or 'masks'
             dry_run (bool): if True, print stats and show a sample grid without saving
-
-        Returns:
-            int: number of patches extracted
+            valid_H, valid_W (int|None): bounds of the real (non-zero-padded) image area within
+                the tiling_size canvas. Pixels at row>=valid_H or col>=valid_W are OOB and get -1.
+                If None, the entire canvas is treated as valid.
         '''
-        tile_size = self.c['preprocess']['tile_size']
-        stride    = self.c['preprocess']['stride']
-        data_dir  = Path(self.c['data_loader']['args']['data_dir'])
-        out_dir   = data_dir / subdir / stem
+        tile_size    = self.c['preprocess']['tile_size']
+        stride       = self.c['preprocess']['stride']
+        context_size = self.c['preprocess'].get('context_size', tile_size)
+        data_dir     = Path(self.c['data_loader']['args']['data_dir'])
+        out_dir      = data_dir / subdir / stem
 
         img_hwc = np.transpose(image, (1, 2, 0))   # HWC for slicing
         H, W    = img_hwc.shape[:2]
+        C       = img_hwc.shape[2]
+
+        if valid_H is None: valid_H = H
+        if valid_W is None: valid_W = W
+
+        # Images save the full context patch (size context_size). Masks save only the
+        # inner patch (size tile_size) — the loss center-crops the model output to match.
+        save_size = context_size if subdir == 'images' else tile_size
+        pad       = (save_size - tile_size) // 2
+        assert pad >= 0 and (save_size - tile_size) % 2 == 0, \
+            f"save_size ({save_size}) must be >= tile_size ({tile_size}) and differ by an even amount"
 
         patch_info = []
-        sample_patches = []   # kept for dry-run preview
+        sample_patches = []
 
         for y in range(0, H - tile_size + 1, stride):
             for x in range(0, W - tile_size + 1, stride):
-                patch = np.transpose(
-                    img_hwc[y:y+tile_size, x:x+tile_size], (2, 0, 1)   # CHW
-                ).copy()
+                # Saved patch: extracted at (y - pad, x - pad) with size save_size.
+                # Pad with -1 where outside [0, valid_H) x [0, valid_W) so the model can
+                # distinguish out-of-bounds from genuine background.
+                cy, cx = y - pad, x - pad
+                patch_hwc = np.full((save_size, save_size, C), -1.0, dtype=np.float32)
+
+                src_y0 = max(0, cy);              src_y1 = min(valid_H, cy + save_size)
+                src_x0 = max(0, cx);              src_x1 = min(valid_W, cx + save_size)
+                dst_y0 = src_y0 - cy;             dst_y1 = src_y1 - cy
+                dst_x0 = src_x0 - cx;             dst_x1 = src_x1 - cx
+
+                if src_y1 > src_y0 and src_x1 > src_x0:
+                    patch_hwc[dst_y0:dst_y1, dst_x0:dst_x1] = img_hwc[src_y0:src_y1, src_x0:src_x1]
+
+                patch = np.transpose(patch_hwc, (2, 0, 1)).copy()   # CHW
                 tensor = torch.from_numpy(patch)
 
                 filename = f'patch_{y:04d}_{x:04d}.pt'
@@ -351,7 +385,9 @@ class Preprocessor:
                     'stem': stem,
                     'x': x, 'y': y,
                     'width': tile_size, 'height': tile_size,
+                    'context_size': context_size,
                     'image_W': W, 'image_H': H,
+                    'valid_W': valid_W, 'valid_H': valid_H,
                 })
 
         if not dry_run and patch_info:
@@ -360,6 +396,7 @@ class Preprocessor:
 
         n = len(patch_info)
         print(f"  [local] {subdir}/{stem}/patch_*  {n} patches  "
+              f"(tile={tile_size}, context={context_size}, stride={stride})  "
               f"({(H - tile_size) // stride + 1}y × {(W - tile_size) // stride + 1}x)")
 
         if dry_run and sample_patches:
