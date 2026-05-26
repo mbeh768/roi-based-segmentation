@@ -440,8 +440,20 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
     [EXPERIMENT 7I] - Do not include tiles that are not within 5% image min dimension of the ROI
     Remove foreground reinforcement, otherwise identical to EXPERIMENT_6E
 
+    [NOTE] - cropping based on ROI was overly agresssive, the 5% max image dim exclusion zone is flawed and zone hsould be based on tile size
+
     Expected: This should help massively in helping the user clearly define where segmentation must occur and where it should
     not, taking high impact, low information decisions away form the machine and giving it to the user, which can employ clinical
     knowledge the machine isnt capable of resonining with
     run: python3 train.py -c EXPERIMENT7/EXPERIMENT_7I.json
     Results: No better validation performance compared to 6E but much much more consistency
+
+
+    [EXPERIMENT 7J] - re-run of 7I with corrected ROI exclusion implementation
+    identical config to 7I; the underlying filter now uses tile bounding-box minimum distance to the ROI
+    (instead of tile center), so any tile that overlaps the ROI or contains a pixel within the radius is kept
+
+    Expected: more tiles retained near ROI boundary than 7I; validation performance should match or exceed 7I
+    with similar stability gains
+    run: python3 train.py -c EXPERIMENT7/EXPERIMENT_7J.json
+    Results:

@@ -222,10 +222,13 @@ class LocalGlobalDataset(Dataset):
             image_H, image_W = entry['image_H'], entry['image_W']
             y, x = entry['y'], entry['x']
             h, w = entry['height'], entry['width']
-            cy_roi = int(np.clip((y + h / 2) / image_H * H_roi, 0, H_roi - 1))
-            cx_roi = int(np.clip((x + w / 2) / image_W * W_roi, 0, W_roi - 1))
+            y0_roi = int(np.clip(y / image_H * H_roi, 0, H_roi - 1))
+            x0_roi = int(np.clip(x / image_W * W_roi, 0, W_roi - 1))
+            y1_roi = int(np.clip((y + h) / image_H * H_roi, 0, H_roi - 1)) + 1
+            x1_roi = int(np.clip((x + w) / image_W * W_roi, 0, W_roi - 1)) + 1
+            min_dist = dist[y0_roi:y1_roi, x0_roi:x1_roi].min()
             threshold_roi_px = self.roi_exclusion_radius * min(image_H, image_W) * (H_roi / image_H)
-            if dist[cy_roi, cx_roi] <= threshold_roi_px:
+            if min_dist <= threshold_roi_px:
                 kept.append(item)
 
         n_before = len(self.items)

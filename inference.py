@@ -159,9 +159,11 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         dist = cv2.distanceTransform(1 - roi_bin, cv2.DIST_L2, 5)
         threshold_roi_px = radius * min(H, W) * (H_roi / H)
         for i, (ty, tx) in enumerate([(y, x) for y in ys for x in xs]):
-            cy_roi = int(np.clip((ty + tile_size / 2) / H * H_roi, 0, H_roi - 1))
-            cx_roi = int(np.clip((tx + tile_size / 2) / W * W_roi, 0, W_roi - 1))
-            if dist[cy_roi, cx_roi] > threshold_roi_px:
+            y0_roi = int(np.clip(ty / H * H_roi, 0, H_roi - 1))
+            x0_roi = int(np.clip(tx / W * W_roi, 0, W_roi - 1))
+            y1_roi = int(np.clip((ty + tile_size) / H * H_roi, 0, H_roi - 1)) + 1
+            x1_roi = int(np.clip((tx + tile_size) / W * W_roi, 0, W_roi - 1)) + 1
+            if dist[y0_roi:y1_roi, x0_roi:x1_roi].min() > threshold_roi_px:
                 probs_tiles[i] = 0.0
 
     prob_map = stitch(list(probs_tiles), ys, xs, H, W, tile_size, stride)
