@@ -108,6 +108,76 @@ class _GlobalUNet(nn.Module):
         return x
 
 
+class _GlobalUNetHD(nn.Module):
+    """
+    High-res global UNet (EXPERIMENT 8C). Ingests a high-res global image
+    (e.g. 1024) and emits a feature map at input/4 (e.g. 256) — the working
+    resolution the rest of the pipeline expects.
+
+    A 2-stage strided stem learns the 4x downsample that used to be a fixed
+    bilinear preprocess step ("learned downsampling"); the body is the same
+    pool/skip UNet as _GlobalUNet running at the working resolution, so it
+    keeps the multi-scale bottleneck. Output: (B, out_ch, in/4, in/4).
+    """
+    def __init__(self, in_ch=3, out_ch=64):
+        super().__init__()
+        self.pool = nn.MaxPool2d(2)
+
+        # learned downsampling stem: in -> in/2 -> in/4
+        self.stem1 = _double_conv(in_ch, 16)        # @in
+        self.stem2 = _double_conv(16,    32)        # @in/2
+
+        # UNet body at the working resolution (in/4)
+        self.enc1 = _double_conv(32, 32)            # @in/4
+        self.enc2 = _double_conv(32, 64)            # /8
+        self.enc3 = _double_conv(64, 64)            # /16
+        self.bot  = _double_conv(64, 64)            # /32
+
+        self.up3  = nn.ConvTranspose2d(64, 64, 2, 2)
+        self.dec3 = _double_conv(64 + 64, 64)       # +enc3 → /16
+        self.up2  = nn.ConvTranspose2d(64, 64, 2, 2)
+        self.dec2 = _double_conv(64 + 64, 64)       # +enc2 → /8
+        self.up1  = nn.ConvTranspose2d(64, out_ch, 2, 2)
+        self.dec1 = _double_conv(out_ch + 32, out_ch)  # +enc1 → /4 (working res)
+
+    def forward(self, x):
+        x  = self.pool(self.stem1(x))               # in/2
+        x  = self.pool(self.stem2(x))               # in/4
+        s1 = self.enc1(x)                            # in/4
+        s2 = self.enc2(self.pool(s1))               # /8
+        s3 = self.enc3(self.pool(s2))               # /16
+        x  = self.bot(self.pool(s3))                # /32
+        x  = self.dec3(torch.cat([self.up3(x), s3], dim=1))   # /16
+        x  = self.dec2(torch.cat([self.up2(x), s2], dim=1))   # /8
+        x  = self.dec1(torch.cat([self.up1(x), s1], dim=1))   # /4
+        return x
+
+
+class _GlobalCNNHD(nn.Module):
+    """
+    High-res global CNN (EXPERIMENT 8D). Same high-res input and same input/4
+    output as _GlobalUNetHD, but no bottleneck and no skips — features flow
+    straight down 1024 → 256 and are then refined at the working resolution.
+
+    Tests whether the UNet bottleneck (multi-scale context) matters versus
+    plain high-res-aware downsampling.  Output: (B, out_ch, in/4, in/4).
+    """
+    def __init__(self, in_ch=3, out_ch=64):
+        super().__init__()
+        self.pool = nn.MaxPool2d(2)
+        self.down1 = _double_conv(in_ch, 32)        # @in    → pool /2
+        self.down2 = _double_conv(32,    64)        # @in/2  → pool /4
+        self.body1 = _double_conv(64,    64)        # @in/4
+        self.body2 = _double_conv(64,    out_ch)    # @in/4
+
+    def forward(self, x):
+        x = self.pool(self.down1(x))                # in/2
+        x = self.pool(self.down2(x))                # in/4
+        x = self.body1(x)
+        x = self.body2(x)
+        return x
+
+
 class PretrainedLocalGlobalUNet(BaseModel):
     """
     Identical to LocalGlobalUNet but loads SSL-pretrained weights into global_enc.
@@ -271,7 +341,7 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
 
         self.bot_drop = nn.Dropout2d(bottleneck_dropout)
 
-        self.global_enc = _GlobalUNet(in_ch=in_ch, out_ch=global_ch)
+        self.global_enc = self._build_global_enc(in_ch, global_ch)
         if ssl_checkpoint is not None:
             ckpt = torch.load(ssl_checkpoint, map_location='cpu', weights_only=False)
             ssl_sd = ckpt['state_dict']
@@ -300,6 +370,11 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
 
         self.head     = nn.Conv2d(c1, num_classes, kernel_size=1)
         self.aux_head = nn.Conv2d(global_ch, num_classes, kernel_size=1)
+
+    def _build_global_enc(self, in_ch, global_ch):
+        """Global branch encoder. Subclasses override to swap the encoder while
+        reusing the SSL-load + freeze logic in __init__."""
+        return _GlobalUNet(in_ch=in_ch, out_ch=global_ch)
 
     def forward(self, local, glob, pos, roi=None):
         s1, s2, s3, s4, x = self.backbone(local)     # /2, /4, /8, /16, /32
@@ -508,6 +583,33 @@ class ImageNetPretrainedLocalGlobalUNetMinimalDecoder(ImageNetPretrainedLocalGlo
         return main
 
 
+class ImageNetPretrainedLocalGlobalUNetHDGlobalUNet(ImageNetPretrainedLocalGlobalUNet):
+    """
+    EXPERIMENT 8C. Identical to ImageNetPretrainedLocalGlobalUNet but the global
+    branch is _GlobalUNetHD: it ingests a high-res (e.g. 1024) global image and
+    learns the downsample to the 256 working resolution, keeping the UNet
+    bottleneck. ssl_checkpoint must come from SSLGlobalUNetHD pretraining.
+
+    Config:
+        "arch": {"type": "ImageNetPretrainedLocalGlobalUNetHDGlobalUNet", "args": {...}}
+    """
+    def _build_global_enc(self, in_ch, global_ch):
+        return _GlobalUNetHD(in_ch=in_ch, out_ch=global_ch)
+
+
+class ImageNetPretrainedLocalGlobalUNetHDGlobalCNN(ImageNetPretrainedLocalGlobalUNet):
+    """
+    EXPERIMENT 8D. Like 8C, but the global branch is _GlobalCNNHD — a plain
+    strided CNN with no bottleneck (features flow straight 1024 → 256).
+    ssl_checkpoint must come from SSLGlobalCNNHD pretraining.
+
+    Config:
+        "arch": {"type": "ImageNetPretrainedLocalGlobalUNetHDGlobalCNN", "args": {...}}
+    """
+    def _build_global_enc(self, in_ch, global_ch):
+        return _GlobalCNNHD(in_ch=in_ch, out_ch=global_ch)
+
+
 class SSLGlobalUNet(BaseModel):
     """
     Self-supervised wrapper around _GlobalUNet for pretraining.
@@ -547,5 +649,67 @@ class SSLGlobalUNet(BaseModel):
         local_recon = self.local_head(local_feat)                       # (B*N, in_ch, cs, cs)
         local_recon = local_recon.reshape(B, N, *local_recon.shape[1:]) # (B, N, in_ch, cs, cs)
         return global_recon, local_recon, feat
+
+
+class _SSLGlobalHD(BaseModel):
+    """
+    SSL wrapper for the HD (1024-in / 256-out) global encoders (8C/8D).
+
+    Same two-head reconstruction scheme as SSLGlobalUNet. Because these encoders
+    emit features at input/4, the global reconstruction is produced at feature
+    resolution and bilinearly upsampled back to the input size so the existing
+    SSLTrainer (which compares against full-res clean_global + erase_mask) is
+    unchanged. The encoder is stored as self.unet so the downstream `unet.`
+    state-dict prefix used by the supervised models still matches.
+
+    After pretraining, transfer self.unet weights to the matching supervised
+    model's global_enc (8C → _GlobalUNetHD, 8D → _GlobalCNNHD).
+    """
+    def __init__(self, encoder, in_ch, out_ch):
+        super().__init__()
+        self.unet = encoder
+        self.global_head = nn.Sequential(
+            _double_conv(out_ch, out_ch),
+            _double_conv(out_ch, out_ch),
+            nn.Conv2d(out_ch, in_ch, kernel_size=1),
+        )
+        self.local_head = nn.Sequential(
+            _double_conv(out_ch, out_ch),
+            _double_conv(out_ch, out_ch),
+            nn.Conv2d(out_ch, in_ch, kernel_size=1),
+        )
+
+    def forward(self, aug_global, pos, local_target):
+        feat = self.unet(aug_global)                                    # (B, out_ch, H/4, W/4)
+        global_recon = self.global_head(feat)                           # (B, in_ch, H/4, W/4)
+        global_recon = F.interpolate(global_recon, size=aug_global.shape[2:],
+                                     mode='bilinear', align_corners=True)
+        cs = local_target.shape[-1]
+        B, N = pos.shape[:2]                                            # pos: (B, N, 4)
+        feat_exp = feat.repeat_interleave(N, dim=0)                    # (B*N, out_ch, H, W)
+        local_feat = _crop_and_resize(feat_exp, pos.reshape(B * N, 4), cs, cs)
+        local_recon = self.local_head(local_feat)                       # (B*N, in_ch, cs, cs)
+        local_recon = local_recon.reshape(B, N, *local_recon.shape[1:]) # (B, N, in_ch, cs, cs)
+        return global_recon, local_recon, feat
+
+
+class SSLGlobalUNetHD(_SSLGlobalHD):
+    """SSL pretraining wrapper for EXPERIMENT 8C (_GlobalUNetHD).
+
+    Config:
+        "arch": {"type": "SSLGlobalUNetHD", "args": {"in_ch": 1, "out_ch": 64}}
+    """
+    def __init__(self, in_ch=3, out_ch=64):
+        super().__init__(_GlobalUNetHD(in_ch=in_ch, out_ch=out_ch), in_ch, out_ch)
+
+
+class SSLGlobalCNNHD(_SSLGlobalHD):
+    """SSL pretraining wrapper for EXPERIMENT 8D (_GlobalCNNHD).
+
+    Config:
+        "arch": {"type": "SSLGlobalCNNHD", "args": {"in_ch": 1, "out_ch": 64}}
+    """
+    def __init__(self, in_ch=3, out_ch=64):
+        super().__init__(_GlobalCNNHD(in_ch=in_ch, out_ch=out_ch), in_ch, out_ch)
 
 

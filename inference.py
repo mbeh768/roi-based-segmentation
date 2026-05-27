@@ -260,6 +260,16 @@ def main(args):
         raw_config = json.load(f)
     p = Preprocessor(raw_config)
 
+    save_dir = None
+    if args.savefigs:
+        ckpt_path = Path(args.model)
+        # saved/models/<name>/<run_id>/... -> saved/log/<name>/<run_id>/inference
+        log_root = Path(*['saved/log'] + list(ckpt_path.parts[2:-1]))
+        save_dir = log_root / 'inference'
+        save_dir.mkdir(parents=True, exist_ok=True)
+        plt.switch_backend('Agg')
+        print(f"Saving figures to {save_dir}/")
+
     if args.dataset_pairs:
         if args.roi is not None:
             print('WARNING: --roi is ignored in --dataset-pairs mode; '
@@ -274,13 +284,15 @@ def main(args):
                 print(f"  [{i+1}/{len(pairs)}] {img_path.name}: no ROI found — skipping")
                 continue
             title = f"{img_path.name}  [{i+1}/{len(pairs)}]"
+            out = str(save_dir / f"{img_path.stem}.png") if save_dir else args.output
             run_one(img_path, mask_path, model, device, p, args.threshold, title,
-                    args.output, roi_path=None, config=raw_config)
+                    out, roi_path=None, config=raw_config)
     else:
         img_path  = Path(args.image)
         mask_path = Path(args.mask) if args.mask else None
+        out = str(save_dir / f"{img_path.stem}.png") if save_dir else args.output
         run_one(img_path, mask_path, model, device, p, args.threshold, img_path.name,
-                args.output, roi_path=args.roi, config=raw_config)
+                out, roi_path=args.roi, config=raw_config)
 
 
 if __name__ == '__main__':
@@ -299,6 +311,8 @@ if __name__ == '__main__':
                         help='path to roi_<stem>.pt (required if model was trained with use_roi=true; '
                              'if omitted, inference will try data_dir/images/<stem>/roi_<stem>.pt)')
     parser.add_argument('--output',       default=None,  help='save figure here instead of displaying')
+    parser.add_argument('--savefigs',     action='store_true',
+                        help='save all figures to saved/log/<name>/<run_id>/inference/ instead of displaying')
     parser.add_argument('--threshold',    default=0.5, type=float,
                         help='sigmoid threshold for binary prediction (default 0.5)')
     main(parser.parse_args())
