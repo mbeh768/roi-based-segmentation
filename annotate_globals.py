@@ -1,17 +1,23 @@
 """
 Rapid-fire ROI annotation for every global.pt in a preprocessed data dir.
 
-Each slide gets a single ROI written to:
-    <data_dir>/images/<stem>/roi_<stem>.pt      shape (1, H, W) float32 in {0,1}
+Each slide gets one or more ROIs written to:
+    <data_dir>/images/<stem>/roi_<stem>.pt        shape (1, H, W) float32 in {0,1}
+    <data_dir>/images/<stem>/roi_<stem>_1.pt      additional ROI for same slide
+    <data_dir>/images/<stem>/roi_<stem>_2.pt      ...
 
-UI is swappable via the `ROIDrawer` interface. Current implementation is
-`BrushROIDrawer` (freeform circular brush).
+UI is swappable via the `ROIDrawer` interface. The default brush mode uses
+`BrushROIDrawer` (freeform circular brush). With --showgt, `GtTileROIDrawer`
+is used instead: the ground-truth mask is displayed under an 8x8 tile grid and
+each click copies GT foreground from the clicked tile into the ROI.
 
 Usage:
     python annotate_globals.py --data-dir data/[collapsed]64_tiles_per_image
     python annotate_globals.py --data-dir ... --brush-radius 24 --canvas-size 768
     python annotate_globals.py --data-dir ... --overwrite
     python annotate_globals.py --data-dir ... --start-from <stem>
+    python annotate_globals.py --data-dir ... --add                       # add additional ROIs to slides that already have one
+    python annotate_globals.py --data-dir ... --showgt --add              # build ROIs from the GT mask by clicking tiles
 
 Keys:
     L-click / drag     paint ROI
@@ -113,19 +119,19 @@ class BrushROIDrawer(ROIDrawer):
 
     def on_mouse(self, event, x, y, flags):
         self._cursor = (int(x), int(y))
+        # Erase = Shift + L-click (Shift state is read live, so toggling Shift
+        # mid-drag switches the stroke between paint and erase).
+        erase = bool(flags & cv2.EVENT_FLAG_SHIFTKEY)
+        value = 0 if erase else 1
         if event == cv2.EVENT_LBUTTONDOWN:
             self._mouse_down = 'L'
             self._last_xy = None
-            self._stroke(x, y, 1)
-        elif event == cv2.EVENT_RBUTTONDOWN:
-            self._mouse_down = 'R'
-            self._last_xy = None
-            self._stroke(x, y, 0)
-        elif event in (cv2.EVENT_LBUTTONUP, cv2.EVENT_RBUTTONUP):
+            self._stroke(x, y, value)
+        elif event == cv2.EVENT_LBUTTONUP:
             self._mouse_down = None
             self._last_xy = None
-        elif event == cv2.EVENT_MOUSEMOVE and self._mouse_down is not None:
-            self._stroke(x, y, 1 if self._mouse_down == 'L' else 0)
+        elif event == cv2.EVENT_MOUSEMOVE and self._mouse_down == 'L':
+            self._stroke(x, y, value)
 
     def render_overlay(self, canvas_bgr):
         h, w = canvas_bgr.shape[:2]
@@ -146,6 +152,126 @@ class BrushROIDrawer(ROIDrawer):
         return torch.from_numpy(full).unsqueeze(0)
 
 
+class GtTileROIDrawer(BrushROIDrawer):
+    """ROI drawer that shows the ground-truth mask under an N×N tile grid.
+
+    Left-click a tile to copy GT=1 pixels in that tile into the ROI; right-click
+    to clear ROI within that tile. Brush behavior from the parent is unused."""
+
+    def __init__(self, grid=8, gt_color=(0, 220, 0), gt_alpha=0.35,
+                 grid_color=(255, 255, 0), **brush_kw):
+        super().__init__(**brush_kw)
+        self.grid = int(grid)
+        self.gt_color = np.array(gt_color, dtype=np.float32)
+        self.gt_alpha = float(gt_alpha)
+        self.grid_color = grid_color
+        self.gt_mask = None  # uint8 {0,1} at canvas size
+
+    def reset(self, canvas_h, canvas_w):
+        super().reset(canvas_h, canvas_w)
+        self.gt_mask = None
+
+    def set_gt(self, gt_np):
+        """gt_np: (H, W) array in {0,1}, original resolution. None clears."""
+        if gt_np is None:
+            self.gt_mask = None
+            return
+        resized = cv2.resize(gt_np.astype(np.float32),
+                             (self.canvas_w, self.canvas_h),
+                             interpolation=cv2.INTER_NEAREST)
+        self.gt_mask = (resized > 0.5).astype(np.uint8)
+
+    def _tile_extent(self, ix, iy):
+        ch, cw = self.canvas_h, self.canvas_w
+        g = self.grid
+        x0 = int(round(ix * cw / g));  x1 = int(round((ix + 1) * cw / g))
+        y0 = int(round(iy * ch / g));  y1 = int(round((iy + 1) * ch / g))
+        return y0, y1, x0, x1
+
+    def _apply_tile(self, x, y, add):
+        if self.gt_mask is None:
+            return
+        g = self.grid
+        ix = max(0, min(g - 1, int(x * g / self.canvas_w)))
+        iy = max(0, min(g - 1, int(y * g / self.canvas_h)))
+        y0, y1, x0, x1 = self._tile_extent(ix, iy)
+        if add:
+            self.mask[y0:y1, x0:x1] = np.maximum(
+                self.mask[y0:y1, x0:x1], self.gt_mask[y0:y1, x0:x1]
+            )
+        else:
+            self.mask[y0:y1, x0:x1] = 0
+
+    def on_mouse(self, event, x, y, flags):
+        """Side-by-side: GT panel (left) is tile-copy; ROI panel (right) is brush.
+        Shift = erase / clear (in place of right-click, which collides with WM menus)."""
+        self._cursor = (int(x), int(y))
+        if event == cv2.EVENT_LBUTTONUP:
+            self._mouse_down = None
+            self._last_xy = None
+            return
+        w = self.canvas_w
+        if x < w:
+            # GT panel — L-click copies GT in tile; Shift+L-click clears the tile.
+            erase = bool(flags & cv2.EVENT_FLAG_SHIFTKEY)
+            if event == cv2.EVENT_LBUTTONDOWN:
+                self._apply_tile(x, y, add=not erase)
+            elif event == cv2.EVENT_MOUSEMOVE and self._mouse_down is not None:
+                # Cursor crossed into GT mid-stroke; break the brush stroke so the
+                # next stroke on the ROI panel starts fresh instead of long-lining.
+                self._last_xy = None
+        else:
+            # ROI panel — delegate to brush behavior, translating x into panel coords
+            super().on_mouse(event, x - w, y, flags)
+
+    def _label(self, panel, text):
+        cv2.rectangle(panel, (0, 0), (60, 20), (0, 0, 0), -1)
+        cv2.putText(panel, text, (6, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (220, 220, 220), 1, cv2.LINE_AA)
+
+    def render_overlay(self, canvas_bgr):
+        h, w = canvas_bgr.shape[:2]
+
+        # --- LEFT: GT panel (interactive) — global image + GT overlay + grid ---
+        gt_panel = canvas_bgr.astype(np.float32)
+        if self.gt_mask is not None:
+            gt = self.gt_mask.astype(bool)
+            gt_layer = np.tile(self.gt_color, (h, w, 1))
+            alpha = np.where(gt[..., None], self.gt_alpha, 0.0).astype(np.float32)
+            gt_panel = gt_panel * (1 - alpha) + gt_layer * alpha
+        gt_panel = np.clip(gt_panel, 0, 255).astype(np.uint8)
+        for i in range(1, self.grid):
+            xg = int(round(i * w / self.grid))
+            cv2.line(gt_panel, (xg, 0), (xg, h - 1), self.grid_color, 1, cv2.LINE_AA)
+            yg = int(round(i * h / self.grid))
+            cv2.line(gt_panel, (0, yg), (w - 1, yg), self.grid_color, 1, cv2.LINE_AA)
+        if self._cursor is not None and 0 <= self._cursor[0] < w:
+            g = self.grid
+            ix = max(0, min(g - 1, int(self._cursor[0] * g / w)))
+            iy = max(0, min(g - 1, int(self._cursor[1] * g / h)))
+            y0, y1, x0, x1 = self._tile_extent(ix, iy)
+            cv2.rectangle(gt_panel, (x0, y0), (x1 - 1, y1 - 1), self.cursor_color, 1)
+
+        # --- RIGHT: ROI panel (brush-interactive) — global + ROI overlay + brush cursor ---
+        roi_panel = canvas_bgr.astype(np.float32)
+        roi = self.mask.astype(bool)
+        roi_layer = np.tile(self.fill_color, (h, w, 1))
+        alpha = np.where(roi[..., None], self.fill_alpha, 0.0).astype(np.float32)
+        roi_panel = roi_panel * (1 - alpha) + roi_layer * alpha
+        roi_panel = np.clip(roi_panel, 0, 255).astype(np.uint8)
+        if self._cursor is not None and self._cursor[0] >= w:
+            bx = self._cursor[0] - w
+            by = self._cursor[1]
+            cv2.circle(roi_panel, (bx, by), self.radius, self.cursor_color, 1,
+                       lineType=cv2.LINE_AA)
+
+        self._label(gt_panel,  'GT - click tiles')
+        self._label(roi_panel, 'ROI - draw here')
+        out = np.hstack([gt_panel, roi_panel])
+        cv2.line(out, (w, 0), (w, h - 1), (200, 200, 200), 1)
+        return out
+
+
 def _global_to_bgr(tensor):
     t = tensor.detach().cpu().float().numpy()
     lo, hi = t.min(), t.max()
@@ -162,8 +288,8 @@ def _global_to_bgr(tensor):
 KEYBINDS = [
     ('L-click / drag', 'paint ROI',
      'Hold left mouse button and drag to paint the ROI in orange.'),
-    ('R-click / drag', 'erase ROI',
-     'Hold right mouse button and drag to erase. Use this on a filled mask to carve out islands / holes.'),
+    ('Shift + L-drag', 'erase ROI',
+     'Hold Shift and left-click / drag to erase. Use this on a filled mask to carve out islands / holes. In --showgt mode, Shift+L-click on a GT tile clears the ROI inside that tile.'),
     ('- / =',          'shrink / grow brush',
      'Adjust brush radius. Step size scales with current radius.'),
     ('f',              'flood-fill',
@@ -171,7 +297,9 @@ KEYBINDS = [
     ('y / n',          'fill confirm',
      'During flood-fill preview only: y commits the filled mask, n / ESC discards the fill and keeps the outline.'),
     ('s',              'save + next',
-     'Save current ROI to roi_<stem>.pt at original global resolution and advance to next slide.'),
+     'Save current ROI to the next available slot (roi_<stem>.pt, then roi_<stem>_1.pt, ...) and advance to next slide. With --overwrite, always writes the primary roi_<stem>.pt.'),
+    ('a',              'save + stay',
+     'Save current ROI to the next available slot and clear the canvas, staying on this slide so you can draw another ROI for the same image.'),
     ('c',              'clear',
      'Clear all painting on the current slide. Does not delete saved files.'),
     ('b',              'back',
@@ -265,8 +393,26 @@ def _draw_banner(img, lines):
         cv2.putText(img, ln, (pad, y), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 255, 0), 2)
 
 
-def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from):
+def _next_roi_path(image_dir, stem, overwrite):
+    """Return the path the next save should write to.
+
+    overwrite=True  -> always primary roi_<stem>.pt (replace it)
+    overwrite=False -> first nonexistent of roi_<stem>.pt, roi_<stem>_1.pt, ..."""
+    primary = image_dir / stem / f'roi_{stem}.pt'
+    if overwrite or not primary.exists():
+        return primary
+    i = 1
+    while True:
+        p = image_dir / stem / f'roi_{stem}_{i}.pt'
+        if not p.exists():
+            return p
+        i += 1
+
+
+def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from,
+             showgt=False, add=False, gt_grid=8):
     image_dir = Path(data_dir) / 'images'
+    mask_dir  = Path(data_dir) / 'masks'
     stems = sorted(p.parent.name for p in image_dir.glob('*/global.pt'))
     if not stems:
         raise SystemExit(f'no global.pt under {image_dir}')
@@ -277,10 +423,20 @@ def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from):
             raise SystemExit(f'--start-from {start_from} not found under {image_dir}')
         i = stems.index(start_from)
 
-    drawer = BrushROIDrawer(radius=brush_radius)
+    if overwrite:
+        wiped = 0
+        for p in image_dir.glob('*/roi_*.pt'):
+            p.unlink()
+            wiped += 1
+        print(f'[--overwrite] deleted {wiped} existing roi_*.pt files under {image_dir}')
+
+    if showgt:
+        drawer = GtTileROIDrawer(grid=gt_grid, radius=brush_radius)
+    else:
+        drawer = BrushROIDrawer(radius=brush_radius)
     win = 'annotate_globals'
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(win, canvas_size, canvas_size)
+    cv2.resizeWindow(win, 2 * canvas_size if showgt else canvas_size, canvas_size)
     cv2.setMouseCallback(win, lambda e, x, y, f, _u: drawer.on_mouse(e, x, y, f))
 
     keys_win = 'keybinds'
@@ -316,16 +472,20 @@ def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from):
         canvas = cv2.resize(bgr, (canvas_size, canvas_size),
                             interpolation=cv2.INTER_LINEAR)
         drawer.reset(canvas_size, canvas_size)
-        roi_path = image_dir / stem / f'roi_{stem}.pt'
-        if roi_path.exists():
-            existing = torch.load(roi_path, weights_only=True).squeeze(0).numpy()
-            drawer.load_existing(existing)
+        if showgt:
+            gt_path = mask_dir / stem / 'global.pt'
+            if gt_path.exists():
+                gt = torch.load(gt_path, weights_only=True).squeeze(0).numpy()
+                drawer.set_gt(gt)
+            else:
+                print(f'  [warn] --showgt: no GT mask at {gt_path}')
+                drawer.set_gt(None)
 
     while 0 <= i < len(stems):
         stem = stems[i]
-        roi_path = image_dir / stem / f'roi_{stem}.pt'
+        primary_path = image_dir / stem / f'roi_{stem}.pt'
 
-        if roi_path.exists() and not overwrite:
+        if primary_path.exists() and not add:
             n_skipped += 1
             i += 1
             continue
@@ -382,11 +542,26 @@ def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from):
         elif key in (ord('='), ord('+')):
             drawer.set_radius(drawer.radius + max(1, drawer.radius // 8))
         elif key == ord('s'):
+            out_path = _next_roi_path(image_dir, stem, overwrite)
             mask_tensor = drawer.get_mask(H, W)
-            torch.save(mask_tensor, roi_path)
+            torch.save(mask_tensor, out_path)
+            print(f'  saved {out_path.name}')
             n_saved += 1
             i += 1
             current_stem = None
+        elif key == ord('a'):
+            out_path = _next_roi_path(image_dir, stem, overwrite=False)
+            mask_tensor = drawer.get_mask(H, W)
+            torch.save(mask_tensor, out_path)
+            print(f'  saved {out_path.name} (stay)')
+            n_saved += 1
+            # stay on this stem with a fresh canvas; preserve GT overlay if present
+            drawer.reset(canvas_size, canvas_size)
+            if showgt:
+                gt_path = mask_dir / stem / 'global.pt'
+                if gt_path.exists():
+                    gt = torch.load(gt_path, weights_only=True).squeeze(0).numpy()
+                    drawer.set_gt(gt)
 
     cv2.destroyAllWindows()
     print(f'done: saved={n_saved} skipped={n_skipped} total={len(stems)}')
@@ -402,7 +577,13 @@ if __name__ == '__main__':
     parser.add_argument('--canvas-size', type=int, default=768,
                         help='display window size in pixels (default 768)')
     parser.add_argument('--overwrite', action='store_true',
-                        help='re-annotate slides that already have an ROI')
+                        help='DELETE every existing roi_*.pt under the data dir at startup, then annotate from scratch')
     parser.add_argument('--start-from', default=None,
                         help='stem to resume from')
+    parser.add_argument('--add', action='store_true',
+                        help='do not skip slides that already have a primary ROI; save new ROIs to roi_<stem>_N.pt')
+    parser.add_argument('--showgt', action='store_true',
+                        help='show ground-truth mask under a tile grid; click tiles to copy GT foreground into the ROI')
+    parser.add_argument('--gt-grid', type=int, default=8,
+                        help='grid size (cells per side) used by --showgt (default 8)')
     annotate(**vars(parser.parse_args()))

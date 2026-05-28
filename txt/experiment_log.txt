@@ -551,14 +551,13 @@ these experiments augment model input rather than hyperparameters
     [EXPERIMENT 8I] - more tile per image - 512x512 tiles, 256 tiles per image
     Expected: Worse performance because local context is almost meaningless
     Results: slightly worse IOU NEED TO CHECK QUALITATIVLEY
+  
 
+    [EXPERIMENT 8J] - perfect imaginary boundaries
+    Imaginary boundaries are pulled straight from ground truth, still downsampled but should be more accurate, same config as 8I
+    Expected: better Iou because roi doubt isnt caused by imaginary bounds
+    Results: 
 
-    [EXPERIMENT 8J] - 1 in k validation with separate test set for eval
-    this just aims to better leverage labeled data by cycling images between training and val, obviously to truly test performance a test set will be pulled from whatever wasnt used in ssl
-
-    Expected:
-    Results:
-    
 
     [EXPERIMENT 8X] - multiple ROI's
     in addition to current roi's, procure 3 more per image, this is not very scientific with only one person, possibly have dr hillestad do some to gauge r&r
