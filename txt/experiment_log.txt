@@ -462,6 +462,7 @@ decoder narrowing (5D-5I) is excluded and will be addressed separately once 6E i
 
 [EXPERIMENT 8] - data feeding
 these experiments augment model input rather than hyperparameters
+[NOTE] a stride of 256 was preserved in the 512x512 tile experiments, so better qualitative results shoudl be attributed to overlap in inference, which was the point but not explicitly stated
 
     [TODO] - decouple tile_size from global_downsample size in preprocessing/architecture; right now
     they're implicitly coupled through tiling_size + global path, which limits the range of
@@ -539,10 +540,27 @@ these experiments augment model input rather than hyperparameters
     this should have been tried earlier, there are still some boundary artifacts which makes me think that the context isnt being used as well as it could be, computation isnt really an issue so we will just compute loss on all 512x512
     forms a couplet with [EXPERIMENT 8B]
     Expected: superior qualtitative results to [EXPERIMENT 8B] with similar iou graph
-    Results: 
+    Results: clearly better performance on IOU, dont do the context trick
 
 
-    [EXPERIMENT 8H] - multiple ROI's
+    [EXPERIMENT 8H] - increased image size -> back to 64 tiles per image, see how this compares to 64 tiles per image with the smaller context
+    Expected: same performance just increase in compute
+    Results: no meaninful change in performance copmared to experiment 8Gon iou graph
+
+
+    [EXPERIMENT 8I] - more tile per image - 512x512 tiles, 256 tiles per image
+    Expected: Worse performance because local context is almost meaningless
+    Results: slightly worse IOU NEED TO CHECK QUALITATIVLEY
+
+
+    [EXPERIMENT 8J] - 1 in k validation with separate test set for eval
+    this just aims to better leverage labeled data by cycling images between training and val, obviously to truly test performance a test set will be pulled from whatever wasnt used in ssl
+
+    Expected:
+    Results:
+    
+
+    [EXPERIMENT 8X] - multiple ROI's
     in addition to current roi's, procure 3 more per image, this is not very scientific with only one person, possibly have dr hillestad do some to gauge r&r
     the hope is that this will accomplish what roi augmentation experiments failed to acheive and will more accuratley simulate operator error
 
@@ -550,14 +568,7 @@ these experiments augment model input rather than hyperparameters
     Results: 
 
 
-    [EXPERIMENT 8I] - 1 in k validation with separate test set for eval
-    this just aims to better leverage labeled data by cycling images between training and val, obviously to truly test performance a test set will be pulled from whatever wasnt used in ssl
-
-    Expected:
-    Results:
-
-
-    [EXPERIMENT 8J] - Reinforcing the imaginary boundary
+    [EXPERIMENT 8X] - Reinforcing the imaginary boundary
     The user will mark tiles containing the imaginary boundary on rv as "hard regions" that the model will be penalized 3x loss for messing up, hopefully this teaches it to trust roi more here
 
     Expected: better performance on imaginary boundaries at no expense to other segmentation
