@@ -140,24 +140,20 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         m_ys, m_xs, m_H, m_W, m_ts, m_st = m_rest[:6]
         mask_stitched = stitch([t.squeeze() for t in m_tiles], m_ys, m_xs, m_H, m_W, m_ts, m_st)
 
-    # batch all tiles; broadcast the single global image across the batch
     N = len(tiles)
-    local_batch = torch.stack(tiles).to(device)                    # (N, 3, tile_H, tile_W)
-    glob_batch  = glob.unsqueeze(0).expand(N, -1, -1, -1).to(device)  # (N, 3, gH, gW)
+    local_all = torch.stack(tiles)                                 # (N, 3, tile_H, tile_W) on CPU
 
     # pos spans the full context window (matches LocalGlobalDataset); reduces to
     # the inner tile when context_size == tile_size.
     context_size = p.c['preprocess'].get('context_size', tile_size)
     pad = (context_size - tile_size) // 2
-    pos_list = [
+    pos_all = torch.stack([
         torch.tensor([(y - pad) / H, (x - pad) / W,
                       (y - pad + context_size) / H, (x - pad + context_size) / W],
                      dtype=torch.float32)
         for y in ys for x in xs
-    ]
-    pos_batch = torch.stack(pos_list).to(device)                   # (N, 4)
+    ])                                                              # (N, 4) on CPU
 
-    model_args = [local_batch, glob_batch, pos_batch]
     roi = None
     if getattr(model, 'use_roi', False):
         roi = _resolve_roi(roi_path, img_path, config)
@@ -166,12 +162,27 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
                 f"model has use_roi=True but no ROI found for {img_path.name}. "
                 f"Pass --roi <path/to/roi_<stem>.pt> or run annotate_globals.py."
             )
-        roi_batch = roi.unsqueeze(0).expand(N, -1, -1, -1).to(device)  # (N, roi_ch, gH, gW)
-        model_args.append(roi_batch)
 
+    # Chunk the forward to bound GPU memory. Pull batch size from the supplied
+    # config's data_loader.args.batch_size; default to 8 if missing.
+    bs = int(((config or {}).get('data_loader', {}).get('args', {}).get('batch_size', 8)))
+    bs = max(1, bs)
+
+    glob_gpu = glob.to(device)
+    roi_gpu = roi.to(device) if roi is not None else None
+    chunks = []
     with torch.no_grad():
-        logits = model(*model_args)                               # (N, 1, ctx_H, ctx_W)
-    probs_tiles = torch.sigmoid(logits).squeeze(1).cpu()           # (N, ctx_H, ctx_W)
+        for i in range(0, N, bs):
+            n = min(bs, N - i)
+            local_batch = local_all[i:i+n].to(device, non_blocking=True)
+            glob_batch  = glob_gpu.unsqueeze(0).expand(n, -1, -1, -1)
+            pos_batch   = pos_all[i:i+n].to(device, non_blocking=True)
+            model_args  = [local_batch, glob_batch, pos_batch]
+            if roi_gpu is not None:
+                model_args.append(roi_gpu.unsqueeze(0).expand(n, -1, -1, -1))
+            logits = model(*model_args)                            # (n, 1, ctx_H, ctx_W)
+            chunks.append(torch.sigmoid(logits).squeeze(1).cpu())
+    probs_tiles = torch.cat(chunks, dim=0)                          # (N, ctx_H, ctx_W)
 
     # If the model saw a context patch larger than the stitch tile, crop predictions
     # back to the centered tile_size region before stitching.
