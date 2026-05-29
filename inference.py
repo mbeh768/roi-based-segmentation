@@ -23,6 +23,7 @@ import cv2
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 import model.model as module_arch
 from preprocess import Preprocessor
@@ -236,8 +237,9 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         roi_up = cv2.resize(roi_np, (W, H), interpolation=cv2.INTER_NEAREST)
         input_rgb = to_display(torch.from_numpy(full_arr))
         ax_by['roi'].imshow(input_rgb)
-        ax_by['roi'].imshow(roi_up, cmap='Oranges', alpha=0.4, vmin=0, vmax=1)
-        ax_by['roi'].set_title(f'ROI overlay  ({roi_np.shape[0]}x{roi_np.shape[1]} → {H}x{W})')
+        roi_masked = np.ma.masked_where(roi_up < 0.5, roi_up)
+        ax_by['roi'].imshow(roi_masked, cmap='Greens', alpha=0.6, vmin=0, vmax=1)
+        ax_by['roi'].set_title('ROI overlay')
 
     ax_by['prob'].imshow(prob_map.numpy(), cmap='hot', vmin=0, vmax=1)
     ax_by['prob'].set_title('Probability')
@@ -255,12 +257,16 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         ax_by['gt'].imshow(mask_stitched.numpy(), cmap='gray', vmin=0, vmax=1)
         ax_by['gt'].set_title(f'GT  |  IoU={iou_val:.3f}  Acc={acc_val:.3f}')
 
-    for ax in axes:
+    kept_set = set(keep_idx)
+    for name, ax in ax_by.items():
         ax.axis('off')
-        for y in ys[1:]:
-            ax.axhline(y, color='cyan', linewidth=0.5, alpha=0.6)
-        for x in xs[1:]:
-            ax.axvline(x, color='cyan', linewidth=0.5, alpha=0.6)
+        if name != 'prob':
+            continue
+        for i, (ty, tx) in enumerate(tile_coords):
+            color = 'cyan' if i in kept_set else 'red'
+            ax.add_patch(Rectangle((tx, ty), tile_size, tile_size,
+                                   fill=False, edgecolor=color,
+                                   linewidth=0.5, alpha=0.6))
 
     plt.tight_layout()
 

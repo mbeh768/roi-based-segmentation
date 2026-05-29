@@ -68,7 +68,7 @@
     "trainer": {
         "epochs": 800,
         "save_dir": "saved/",
-        "save_period": 25,
+        "save_period": 9999,
         "verbosity": 2,
         "monitor": "min val_loss",
         "early_stop": 100,
