@@ -560,16 +560,40 @@ these experiments augment model input rather than hyperparameters
 
     
     [EXPERIMENT 8K] - global encoder ablation
-    diabling global encoder (replace its concatenation at bottleneck with zero tensors) and using only ROI for global supervision
+    diabling global encoder (replace its concatenation at bottleneck with zero tensors) and using only ROI for global supervision, identical to [EXPERIMENT 8J] otherwise
     Expected: worse performance, proves global is useful
-    Results: 
+    Results: Suggested the opposite, global isnt as good as a quality ROI, the global encoder concept should be revisited at a later time but future experiments will focus on 
+    Qualitativley the results are identical which suggests that global was just being ignored in the presence of quality ROI, notably regions of the image get missed if ROI is outside oftile bounds which makes sense,
+    a solution to this woudl be to use a larger brush and instruct the user to bleed into tissue rather than omit regions when drawing
 
 
     [EXPERIMENT 8L] - Pushing tiling size past resonable global feature map crop size
     with a 2^14=16384 tiling size the patch crop will now be smaller than the bottleneck, 4x4 vs 8x8 if i am correct in my intuition
     this will test whether global features are rich enough (64 dimensional) to imbibe adequate information
     Expected: massive run time, but still adequate results because upsampled 4x4 patch still has enough features to convey information about global context
-    Results: 
+    Results: Ran 13 epochs before analysis of [EXPERIMENT 8K]
+
+
+    [EXPERIMENT 8M] - formalized global ablation
+    couplet with [EXPERIMENT 8K]: physically removes the global branch instead of zeroing g_ctx.
+    arch is new ImageNetPretrainedLocalUNet: ImageNet local encoder + ROI concat at bottleneck,
+    no global encoder, no SSL checkpoint, no aux head; up5 collapses to (c5 + roi_ch -> c4) so
+    parameter count drops by the global branch + the global_ch slice of up5.
+    Identical to [EXPERIMENT 8K] otherwise (same data, ROI, augs, optimizer, schedule).
+    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8M.json
+    Expected: matches 8K — 8K already proved the global branch's contribution is ~0, so removing
+    it physically should not change validation behaviour. Confirms the ablation is real and not
+    an artifact of dead-but-present weights.
+    Results:
+
+
+    [EXPERIMENT 8N] - streamlined model at large tiling
+    couplet with [EXPERIMENT 8L]: same ImageNetPretrainedLocalUNet as 8M, tiling_size=16384.
+    Tests the streamlined model under the small-relative-patch regime that 8L was supposed to
+    probe with the full model.
+    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8N.json
+    Expected: worse IoU as absurdly small tile context begins to fail to encompass bad ROI regions, which will logically lead to ROI robustness experiments
+    Results:
 
 
     [EXPERIMENT 8X] - multiple ROI's

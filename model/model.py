@@ -416,6 +416,105 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
         return main
 
 
+class ImageNetPretrainedLocalUNet(BaseModel):
+    """
+    Streamlined ablation of ImageNetPretrainedLocalGlobalUNet: ImageNet local
+    encoder + optional ROI concatenated at the bottleneck, no global branch and
+    no SSL checkpoint.
+
+    Formalizes the disable_global=True ablation by physically removing the
+    global encoder and the global_ch slice of up5, so parameter count drops by
+    the global branch's weights + global_ch*c4*4 in up5.
+
+    Config:
+        "arch": {"type": "ImageNetPretrainedLocalUNet", "args": {
+            "num_classes": 1,
+            "in_ch": 1,
+            "backbone": "resnet18",
+            "backbone_pretrained": true,
+            "freeze_local_encoder": true,
+            "bottleneck_dropout": 0.1,
+            "use_roi": true,
+            "roi_ch": 1
+        }}
+    """
+    _STAGE_MODULES = ImageNetPretrainedLocalGlobalUNet._STAGE_MODULES
+
+    def __init__(self, num_classes=1, in_ch=3,
+                 backbone='resnet18', backbone_pretrained=True,
+                 freeze_local_encoder=False,
+                 bottleneck_dropout=0.1,
+                 use_roi=False, roi_ch=1):
+        super().__init__()
+
+        self.use_roi = use_roi
+        self.roi_ch = roi_ch if use_roi else 0
+
+        self.backbone = timm.create_model(
+            backbone, pretrained=backbone_pretrained, features_only=True,
+            in_chans=in_ch, out_indices=(0, 1, 2, 3, 4),
+        )
+        enc_ch = self.backbone.feature_info.channels()
+        assert len(enc_ch) == 5, (
+            f"backbone {backbone} exposes {len(enc_ch)} stages; expected 5"
+        )
+        c1, c2, c3, c4, c5 = enc_ch
+
+        if freeze_local_encoder is True:
+            frozen_stages = [0, 1, 2, 3, 4]
+        elif freeze_local_encoder:
+            frozen_stages = list(freeze_local_encoder)
+        else:
+            frozen_stages = []
+        for s in frozen_stages:
+            if s not in self._STAGE_MODULES:
+                raise ValueError(
+                    f"freeze_local_encoder stage {s} invalid; must be in 0..4"
+                )
+            for mod_name in self._STAGE_MODULES[s]:
+                if not hasattr(self.backbone, mod_name):
+                    raise ValueError(
+                        f"backbone '{backbone}' does not expose '{mod_name}'; "
+                        f"stage-level freezing assumes ResNet-family structure"
+                    )
+                for p in getattr(self.backbone, mod_name).parameters():
+                    p.requires_grad = False
+
+        self.bot_drop = nn.Dropout2d(bottleneck_dropout)
+
+        self.up5  = nn.ConvTranspose2d(c5 + self.roi_ch, c4, kernel_size=2, stride=2)
+        self.dec5 = _double_conv(c4 + c4, c4)
+        self.up4  = nn.ConvTranspose2d(c4, c3, kernel_size=2, stride=2)
+        self.dec4 = _double_conv(c3 + c3, c3)
+        self.up3  = nn.ConvTranspose2d(c3, c2, kernel_size=2, stride=2)
+        self.dec3 = _double_conv(c2 + c2, c2)
+        self.up2  = nn.ConvTranspose2d(c2, c1, kernel_size=2, stride=2)
+        self.dec2 = _double_conv(c1 + c1, c1)
+        self.up1  = nn.ConvTranspose2d(c1, c1, kernel_size=2, stride=2)
+        self.dec1 = _double_conv(c1, c1)
+
+        self.head = nn.Conv2d(c1, num_classes, kernel_size=1)
+
+    def forward(self, local, glob, pos, roi=None):
+        # glob is accepted for signature compatibility with LocalGlobalDataLoader batches
+        # but not used; same for pos when use_roi=False.
+        s1, s2, s3, s4, x = self.backbone(local)
+
+        if self.use_roi:
+            assert roi is not None, "use_roi=True but no roi tensor was passed to forward()"
+            roi_ctx = _crop_and_resize(roi, pos, *x.shape[2:])
+            x = torch.cat([x, roi_ctx], dim=1)
+
+        x = self.dec5(torch.cat([self.up5(x), s4], dim=1))
+        x = self.bot_drop(x)
+        x = self.dec4(torch.cat([self.up4(x), s3], dim=1))
+        x = self.dec3(torch.cat([self.up3(x), s2], dim=1))
+        x = self.dec2(torch.cat([self.up2(x), s1], dim=1))
+        x = self.dec1(self.up1(x))
+
+        return self.head(x)
+
+
 class ImageNetPretrainedLocalGlobalUNetLightDecoder(ImageNetPretrainedLocalGlobalUNet):
     """
     Lighter decoder variant of ImageNetPretrainedLocalGlobalUNet.
