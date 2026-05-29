@@ -163,26 +163,49 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
                 f"Pass --roi <path/to/roi_<stem>.pt> or run annotate_globals.py."
             )
 
+    # Build a keep-mask over tiles from ROI exclusion (matches dataset filter).
+    dl_args = (config or {}).get('data_loader', {}).get('args', {})
+    tile_coords = [(y, x) for y in ys for x in xs]
+    keep_idx = list(range(N))
+    if roi is not None and dl_args.get('roi_exclusion', False):
+        radius = dl_args.get('roi_exclusion_radius', 0.05)
+        roi_bin = (roi.squeeze(0).numpy() > 0.5).astype(np.uint8)
+        H_roi, W_roi = roi_bin.shape
+        if roi_bin.max() > 0:
+            dist = cv2.distanceTransform(1 - roi_bin, cv2.DIST_L2, 5)
+            threshold_roi_px = radius * min(H, W) * (H_roi / H)
+            keep_idx = []
+            for i, (ty, tx) in enumerate(tile_coords):
+                y0_roi = int(np.clip(ty / H * H_roi, 0, H_roi - 1))
+                x0_roi = int(np.clip(tx / W * W_roi, 0, W_roi - 1))
+                y1_roi = int(np.clip((ty + tile_size) / H * H_roi, 0, H_roi - 1)) + 1
+                x1_roi = int(np.clip((tx + tile_size) / W * W_roi, 0, W_roi - 1)) + 1
+                if dist[y0_roi:y1_roi, x0_roi:x1_roi].min() <= threshold_roi_px:
+                    keep_idx.append(i)
+            print(f"  ROI exclusion: forwarding {len(keep_idx)}/{N} tiles")
+
     # Chunk the forward to bound GPU memory. Pull batch size from the supplied
     # config's data_loader.args.batch_size; default to 8 if missing.
     bs = int(((config or {}).get('data_loader', {}).get('args', {}).get('batch_size', 8)))
     bs = max(1, bs)
 
+    save_size = context_size
+    probs_tiles = torch.zeros(N, save_size, save_size)               # excluded tiles stay 0
+
     glob_gpu = glob.to(device)
     roi_gpu = roi.to(device) if roi is not None else None
-    chunks = []
     with torch.no_grad():
-        for i in range(0, N, bs):
-            n = min(bs, N - i)
-            local_batch = local_all[i:i+n].to(device, non_blocking=True)
+        for k in range(0, len(keep_idx), bs):
+            batch_idx = keep_idx[k:k+bs]
+            n = len(batch_idx)
+            local_batch = local_all[batch_idx].to(device, non_blocking=True)
             glob_batch  = glob_gpu.unsqueeze(0).expand(n, -1, -1, -1)
-            pos_batch   = pos_all[i:i+n].to(device, non_blocking=True)
+            pos_batch   = pos_all[batch_idx].to(device, non_blocking=True)
             model_args  = [local_batch, glob_batch, pos_batch]
             if roi_gpu is not None:
                 model_args.append(roi_gpu.unsqueeze(0).expand(n, -1, -1, -1))
             logits = model(*model_args)                            # (n, 1, ctx_H, ctx_W)
-            chunks.append(torch.sigmoid(logits).squeeze(1).cpu())
-    probs_tiles = torch.cat(chunks, dim=0)                          # (N, ctx_H, ctx_W)
+            probs_tiles[batch_idx] = torch.sigmoid(logits).squeeze(1).cpu()
 
     # If the model saw a context patch larger than the stitch tile, crop predictions
     # back to the centered tile_size region before stitching.
@@ -190,21 +213,6 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         cs = probs_tiles.shape[-1]
         off = (cs - tile_size) // 2
         probs_tiles = probs_tiles[..., off:off + tile_size, off:off + tile_size]
-
-    dl_args = (config or {}).get('data_loader', {}).get('args', {})
-    if roi is not None and dl_args.get('roi_exclusion', False):
-        radius = dl_args.get('roi_exclusion_radius', 0.05)
-        roi_bin = (roi.squeeze(0).numpy() > 0.5).astype(np.uint8)
-        H_roi, W_roi = roi_bin.shape
-        dist = cv2.distanceTransform(1 - roi_bin, cv2.DIST_L2, 5)
-        threshold_roi_px = radius * min(H, W) * (H_roi / H)
-        for i, (ty, tx) in enumerate([(y, x) for y in ys for x in xs]):
-            y0_roi = int(np.clip(ty / H * H_roi, 0, H_roi - 1))
-            x0_roi = int(np.clip(tx / W * W_roi, 0, W_roi - 1))
-            y1_roi = int(np.clip((ty + tile_size) / H * H_roi, 0, H_roi - 1)) + 1
-            x1_roi = int(np.clip((tx + tile_size) / W * W_roi, 0, W_roi - 1)) + 1
-            if dist[y0_roi:y1_roi, x0_roi:x1_roi].min() > threshold_roi_px:
-                probs_tiles[i] = 0.0
 
     prob_map = stitch(list(probs_tiles), ys, xs, H, W, tile_size, stride)
     pred_map = (prob_map > threshold).float()

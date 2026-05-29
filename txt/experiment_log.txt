@@ -556,6 +556,19 @@ these experiments augment model input rather than hyperparameters
     [EXPERIMENT 8J] - perfect imaginary boundaries
     Imaginary boundaries are pulled straight from ground truth, still downsampled but should be more accurate, same config as 8I
     Expected: better Iou because roi doubt isnt caused by imaginary bounds
+    Results: crazy good results on IoU, very good results qualitative as well
+
+    
+    [EXPERIMENT 8K] - global encoder ablation
+    diabling global encoder (replace its concatenation at bottleneck with zero tensors) and using only ROI for global supervision
+    Expected: worse performance, proves global is useful
+    Results: 
+
+
+    [EXPERIMENT 8L] - Pushing tiling size past resonable global feature map crop size
+    with a 2^14=16384 tiling size the patch crop will now be smaller than the bottleneck, 4x4 vs 8x8 if i am correct in my intuition
+    this will test whether global features are rich enough (64 dimensional) to imbibe adequate information
+    Expected: massive run time, but still adequate results because upsampled 4x4 patch still has enough features to convey information about global context
     Results: 
 
 

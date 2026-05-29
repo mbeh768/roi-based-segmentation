@@ -299,7 +299,7 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
                  backbone='resnet18', backbone_pretrained=True,
                  freeze_local_encoder=False,
                  ssl_checkpoint=None, bottleneck_dropout=0.1,
-                 use_roi=False, roi_ch=1):
+                 use_roi=False, roi_ch=1, disable_global=False):
         super().__init__()
 
         if ssl_checkpoint is None:
@@ -307,6 +307,8 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
 
         self.use_roi = use_roi
         self.roi_ch = roi_ch if use_roi else 0
+        self.disable_global = disable_global
+        self.global_ch = global_ch
 
         # 5-stage encoder at reductions [2, 4, 8, 16, 32]
         self.backbone = timm.create_model(
@@ -379,8 +381,13 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
     def forward(self, local, glob, pos, roi=None):
         s1, s2, s3, s4, x = self.backbone(local)     # /2, /4, /8, /16, /32
 
-        g_feat = self.global_enc(glob)
-        g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
+        if self.disable_global:
+            g_feat = None
+            g_ctx = torch.zeros(x.shape[0], self.global_ch, *x.shape[2:],
+                                device=x.device, dtype=x.dtype)
+        else:
+            g_feat = self.global_enc(glob)
+            g_ctx  = _crop_and_resize(g_feat, pos, *x.shape[2:])
         if self.use_roi:
             assert roi is not None, "use_roi=True but no roi tensor was passed to forward()"
             roi_ctx = _crop_and_resize(roi, pos, *x.shape[2:])
@@ -397,7 +404,7 @@ class ImageNetPretrainedLocalGlobalUNet(BaseModel):
 
         main = self.head(x)
 
-        if self.training:
+        if self.training and g_feat is not None:
             aux = F.interpolate(
                 self.aux_head(g_feat),
                 size=glob.shape[2:],
