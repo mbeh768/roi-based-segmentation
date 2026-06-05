@@ -35,6 +35,10 @@ class Trainer(BaseTrainer):
 
         self.aux_loss_weight = config['trainer'].get('aux_loss_weight', 0.0)
 
+        switch_cfg = config['trainer'].get('loss_switch', None)
+        self._switch_cfg  = switch_cfg   # {trigger_metric, threshold, loss} or None
+        self._switch_done = False
+
         dl_args = config['data_loader']['args']
         self._roi_distort_start    = dl_args.get('roi_distort_strength', 0.0)
         self._roi_distort_end      = dl_args.get('roi_distort_end', self._roi_distort_start)
@@ -185,6 +189,18 @@ class Trainer(BaseTrainer):
         if self.do_validation:
             val_log = self._valid_epoch(epoch)
             log.update(**{'val_'+k : v for k, v in val_log.items()})
+
+        if self._switch_cfg and not self._switch_done:
+            metric = self._switch_cfg['trigger_metric']
+            key = metric if metric.startswith('val_') else f'val_{metric}'
+            if log.get(key, 0.0) >= self._switch_cfg['threshold']:
+                import model.loss as module_loss
+                self.criterion = getattr(module_loss, self._switch_cfg['loss'])
+                self._switch_done = True
+                self.logger.info(
+                    f"[loss_switch] {key}={log[key]:.4f} >= {self._switch_cfg['threshold']} "
+                    f"-> criterion switched to {self._switch_cfg['loss']}"
+                )
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()

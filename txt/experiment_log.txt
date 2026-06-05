@@ -584,7 +584,7 @@ these experiments augment model input rather than hyperparameters
     Expected: matches 8K — 8K already proved the global branch's contribution is ~0, so removing
     it physically should not change validation behaviour. Confirms the ablation is real and not
     an artifact of dead-but-present weights.
-    Results:
+    Results: Identical results, superior performance to global encoder
 
 
     [EXPERIMENT 8N] - streamlined model at large tiling
@@ -593,20 +593,80 @@ these experiments augment model input rather than hyperparameters
     probe with the full model.
     run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8N.json
     Expected: worse IoU as absurdly small tile context begins to fail to encompass bad ROI regions, which will logically lead to ROI robustness experiments
-    Results:
+    Results: didnt evaluate qualtiativley due to infernce challenges, iou looked good
 
 
-    [EXPERIMENT 8X] - multiple ROI's
+    [EXPERIMENT 8O] - multiple ROI's, no global encoder
     in addition to current roi's, procure 3 more per image, this is not very scientific with only one person, possibly have dr hillestad do some to gauge r&r
     the hope is that this will accomplish what roi augmentation experiments failed to acheive and will more accuratley simulate operator error
 
     Expected: slightly better performance due to ability to "think around" roi limitations, not that the model is showing struggle with this right now, but worth trying
-    Results: 
+    Results: indistinguishable results qualitativley, messy ROIs produce results that the model has enough information to get around (ie. segmenting a pocket contained in tissue with the entire pocket in the tile context), suggests dice loss is too lienent
 
 
-    [EXPERIMENT 8X] - Reinforcing the imaginary boundary
-    The user will mark tiles containing the imaginary boundary on rv as "hard regions" that the model will be penalized 3x loss for messing up, hopefully this teaches it to trust roi more here
+    [EXPERIMENT 8P] - 8O with global encoder
+    identical to 8O but uses ImageNetPretrainedLocalGlobalUNet (SSL PROCESS 1B global encoder) alongside the ImageNet local encoder.
+    couplet with 8O: isolates whether the global branch adds anything when multiple ROIs are in play.
+    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8P.json
+    Expected: similar or marginally better than 8O — 8K showed global was being ignored in the presence of quality ROI
+    Results: worse performance, increased noise, this is probably the last I will do with the global encoder, future approaches will use SAM to auto generate ROI instead
 
-    Expected: better performance on imaginary boundaries at no expense to other segmentation
+
+    [EXPERIMENT 8Q] - curriculum loss: bce_dice -> dice_loss at val_iou >= 0.80
+    identical to 8O (ImageNetPretrainedLocalUNet, tiling_size=8192, multiple ROIs) but switches the
+    loss function from bce_dice to pure dice_loss the first epoch validation IoU exceeds 0.80.
+    motivation: BCE pulls logits toward ±∞ and can dominate Dice once the model is already well-calibrated;
+    switching to pure Dice late in training may sharpen boundary predictions without destabilizing early learning.
+    impl: trainer.loss_switch config key; switch is permanent once triggered and logged.
+    run: python3 train.py -c EXPERIMENT8/EXPERIMENT_8Q.json
+    Expected: similar or slightly better boundary quality vs 8O; no regression if the trigger fires late
     Results:
 
+
+[EXPERIMENT 9] - loss function tuning
+exploring whether changing the BCE/Dice balance improves boundary quality and validation IoU
+
+    [EXPERIMENT 9A] - higher BCE weighting throughout training
+    identical to 8O (ImageNetPretrainedLocalUNet, tiling_size=8192, multiple ROIs) but uses
+    bce_dice with a=0.5 (50% BCE + 50% Dice) instead of the default a=0.3 (30% BCE + 70% Dice).
+    motivation: the default heavily favours Dice which optimises overlap; increasing BCE weight
+    encourages better per-pixel calibration and may sharpen boundary confidence.
+    impl: loss field now accepts a dict {"type": "bce_dice", "args": {"a": 0.5}}; train.py
+    wraps it in functools.partial so all other string-based loss configs are unaffected.
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9A.json
+    Expected: IOU was being too generous, resulting in a binary threshold instead of true segmentation, which worked for good rois, but fails for sloppy roi where model has to "think" what segmentation is best
+    Results: slightly better results in validation but not really tangibly, i think the solution is in fine tuning the local encoder
+
+
+    [EXPERIMENT 9B] - fine-tune last local encoder stage at half lr
+    couplet with [EXPERIMENT 8M] (formalized global ablation: ImageNetPretrainedLocalUNet, tiling_size=8192,
+    single ROI, default bce_dice). Until now the ImageNet local encoder has been fully frozen; here the last
+    stage (resnet18 layer4) is unfrozen and fine-tuned at half the global lr while every other stage stays frozen.
+    motivation: 9A suggested the ceiling is in the encoder, not the loss weighting; frozen ImageNet features may
+    not be ideal for histology bottleneck representations, so gently adapting the deepest stage could sharpen
+    segmentation without overfitting the ~120-image dataset, and half lr keeps the pretrained features from washing out.
+    impl: freeze_local_encoder=[0,1,2,3] leaves stage 4 trainable. optimizer now accepts an "encoder_lr_scale" key
+    (scalar, or a per-stage dict keyed by backbone stage index); train.py builds discriminative param groups via the
+    model's _STAGE_MODULES so unfrozen stage(s) train at base_lr*scale while the decoder/head keep base_lr. 9B uses
+    {"4": 0.5} -> 5e-5 on layer4, 1e-4 elsewhere. Built so future experiments can unfreeze more stages, each with its
+    own lr, by editing config only.
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9B.json
+    Expected: matches or modestly beats 8M; encoder adaptation should help boundary/sloppy-ROI cases, half lr should
+    avoid catastrophic forgetting of ImageNet features at this dataset scale
+    Results:
+
+
+    [EXPERIMENT 9C] - fine-tune the ENTIRE local encoder at half lr
+    couplet with [EXPERIMENT 9B]: same 8M base, but instead of only unfreezing layer4 the whole ImageNet local
+    encoder (stages 0-4) is unfrozen and fine-tuned at half the global lr.
+    motivation: 9B probes how much adapting just the deepest stage helps; 9C is the upper bound of that idea -
+    let every encoder stage adapt to histology. half lr across the board guards the pretrained features, but with
+    ~120 images full encoder fine-tuning risks overfitting, so this brackets 9B and tells us whether the gain (if any)
+    comes from deep-stage adaptation alone or from the shallow stages too.
+    impl: freeze_local_encoder=false (nothing frozen). optimizer encoder_lr_scale=0.5 (scalar form) -> all backbone
+    params train at 5e-5 in one group, decoder/head at 1e-4. uses the same discriminative-param-group path added for 9B.
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9C.json
+    Expected: if 9B helped, 9C either matches it (gain was in the deep stage) or overfits and regresses (shallow
+    stages had nothing useful to learn / not enough data); if 9B did nothing, 9C is the stronger test of whether the
+    encoder is the bottleneck at all
+    Results:

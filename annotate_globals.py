@@ -223,6 +223,10 @@ class GtTileROIDrawer(BrushROIDrawer):
         else:
             # ROI panel — delegate to brush behavior, translating x into panel coords
             super().on_mouse(event, x - w, y, flags)
+            # super overwrote _cursor with panel-relative coords; restore the global
+            # coord so render_overlay can tell the cursor is on the ROI panel and
+            # draw the brush circle.
+            self._cursor = (int(x), int(y))
 
     def _label(self, panel, text):
         cv2.rectangle(panel, (0, 0), (60, 20), (0, 0, 0), -1)
@@ -300,6 +304,8 @@ KEYBINDS = [
      'Save current ROI to the next available slot (roi_<stem>.pt, then roi_<stem>_1.pt, ...) and advance to next slide. With --overwrite, always writes the primary roi_<stem>.pt.'),
     ('a',              'save + stay',
      'Save current ROI to the next available slot and clear the canvas, staying on this slide so you can draw another ROI for the same image.'),
+    ('x',              'skip + next',
+     'Advance to the next slide without saving. In-progress painting on this slide is discarded.'),
     ('c',              'clear',
      'Clear all painting on the current slide. Does not delete saved files.'),
     ('b',              'back',
@@ -454,8 +460,12 @@ def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from,
             keys_state['cursor'] = None
 
     cv2.namedWindow(keys_win, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(keys_win, 520, 20 + 24 * len(KEYBINDS))
+    cv2.resizeWindow(keys_win, 520, 60 + 24 * len(KEYBINDS))
     cv2.setMouseCallback(keys_win, _on_keys_mouse)
+
+    BRUSH_MAX = 50
+    cv2.createTrackbar('brush', keys_win, max(1, min(BRUSH_MAX, drawer.radius)),
+                       BRUSH_MAX, lambda v: drawer.set_radius(max(1, v)))
 
     n_saved = n_skipped = 0
     current_stem = None
@@ -531,6 +541,22 @@ def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from,
         elif key == ord('b'):
             i = max(0, i - 1)
             current_stem = None
+        elif key == ord('x'):
+            confirm_view = drawer.render_overlay(gamma_canvas).copy()
+            _draw_banner(confirm_view, [
+                f'[{i+1}/{len(stems)}] {stem}   SKIP THIS SLIDE?',
+                'y = skip without saving   n / ESC = cancel',
+            ])
+            cv2.imshow(win, confirm_view)
+            while True:
+                ck = cv2.waitKey(15) & 0xFF
+                if ck == ord('y'):
+                    n_skipped += 1
+                    i += 1
+                    current_stem = None
+                    break
+                if ck in (ord('n'), 27):
+                    break
         elif key in (ord('['), ord('{')):
             gamma = max(0.1, round(gamma - 0.25, 2))
         elif key in (ord(']'), ord('}')):
@@ -539,8 +565,10 @@ def annotate(data_dir, brush_radius, canvas_size, overwrite, start_from,
             gamma = 1.0
         elif key in (ord('-'), ord('_')):
             drawer.set_radius(drawer.radius - max(1, drawer.radius // 8))
+            cv2.setTrackbarPos('brush', keys_win, min(BRUSH_MAX, drawer.radius))
         elif key in (ord('='), ord('+')):
             drawer.set_radius(drawer.radius + max(1, drawer.radius // 8))
+            cv2.setTrackbarPos('brush', keys_win, min(BRUSH_MAX, drawer.radius))
         elif key == ord('s'):
             out_path = _next_roi_path(image_dir, stem, overwrite)
             mask_tensor = drawer.get_mask(H, W)

@@ -183,13 +183,15 @@ class LocalGlobalDataset(Dataset):
                 patch_path = coords_file.parent / entry['filename']
                 self.items.append((patch_path, stem, entry))
             if self.require_roi:
-                roi_path = coords_file.parent / f'roi_{stem}.pt'
-                if not roi_path.exists():
+                primary = coords_file.parent / f'roi_{stem}.pt'
+                if not primary.exists():
                     raise FileNotFoundError(
-                        f"require_roi=True but missing ROI for stem '{stem}': {roi_path}. "
+                        f"require_roi=True but missing ROI for stem '{stem}': {primary}. "
                         f"Run annotate_globals.py --data-dir {data_dir}."
                     )
-                self.stem_to_roi[stem] = roi_path
+                self.stem_to_roi[stem] = sorted(
+                    coords_file.parent.glob(f'roi_{stem}*.pt')
+                )
 
         assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
 
@@ -202,14 +204,19 @@ class LocalGlobalDataset(Dataset):
     def _filter_by_roi_exclusion(self):
         import cv2
         stem_dist = {}
-        for stem, roi_path in self.stem_to_roi.items():
-            roi = torch.load(roi_path, weights_only=True).squeeze(0).numpy()
-            roi_bin = (roi > 0.5).astype(np.uint8)
-            H_roi, W_roi = roi.shape
-            if roi_bin.max() == 0:
+        for stem, roi_paths in self.stem_to_roi.items():
+            # Union of all ROIs: keep a tile that is near any of the available ROIs.
+            roi_union = None
+            H_roi = W_roi = 0
+            for roi_path in roi_paths:
+                roi = torch.load(roi_path, weights_only=True).squeeze(0).numpy()
+                roi_bin = (roi > 0.5).astype(np.uint8)
+                H_roi, W_roi = roi_bin.shape
+                roi_union = roi_bin if roi_union is None else np.maximum(roi_union, roi_bin)
+            if roi_union is None or roi_union.max() == 0:
                 stem_dist[stem] = None
             else:
-                dist = cv2.distanceTransform(1 - roi_bin, cv2.DIST_L2, 5)
+                dist = cv2.distanceTransform(1 - roi_union, cv2.DIST_L2, 5)
                 stem_dist[stem] = (dist, H_roi, W_roi)
 
         kept = []
@@ -270,7 +277,7 @@ class LocalGlobalDataset(Dataset):
 
         roi = None
         if self.require_roi:
-            roi = torch.load(self.stem_to_roi[stem], weights_only=True)
+            roi = torch.load(random.choice(self.stem_to_roi[stem]), weights_only=True)
             if self.roi_jitter > 0 and random.random() < self.roi_jitter:
                 roi = torch.ones_like(roi)
             if self.roi_dropout > 0 and random.random() < self.roi_dropout:

@@ -112,24 +112,32 @@ def stitch(tile_maps, ys, xs, H, W, tile_size, stride):
     return canvas / count.clamp(min=1)
 
 
-def _resolve_roi(roi_arg, img_path, config):
-    """Return a (1, H, W) float32 ROI tensor, or None if not required."""
+def _resolve_roi(roi_arg, img_path, config, roi_idx=None):
+    """Return a (1, H, W) float32 ROI tensor, or None if not required.
+
+    roi_idx selects among multiple annotated ROIs for the same slide:
+        0  -> roi_<stem>.pt  (primary)
+        1  -> roi_<stem>_1.pt
+        N  -> roi_<stem>_N.pt
+    If roi_idx is None the primary is used (legacy behaviour).
+    """
     if roi_arg is not None:
         return torch.load(Path(roi_arg), weights_only=True)
-    # Auto-lookup: data_dir/images/<stem>/roi_<stem>.pt, matching preprocess layout.
+    # Auto-lookup under data_dir/images/<stem>/.
     try:
         data_dir = Path(config['data_loader']['args']['data_dir'])
     except (KeyError, TypeError):
         return None
     stem = img_path.stem.replace('_image', '').replace('_mask', '')
-    candidate = data_dir / 'images' / stem / f'roi_{stem}.pt'
+    suffix = '' if (roi_idx is None or roi_idx == 0) else f'_{roi_idx}'
+    candidate = data_dir / 'images' / stem / f'roi_{stem}{suffix}.pt'
     if candidate.exists():
         return torch.load(candidate, weights_only=True)
     return None
 
 
 def run_one(img_path, mask_path, model, device, p, threshold, title, output=None,
-            roi_path=None, config=None):
+            roi_path=None, config=None, roi_idx=None):
     print(f"\nPreprocessing {img_path.name}...")
     tiles, ys, xs, H, W, tile_size, stride, full_arr = tif_to_tiles(img_path, p, is_mask=False)
     glob = tif_to_tensor(img_path, p.c, is_mask=False)   # (3, global_H, global_W)
@@ -157,7 +165,7 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
 
     roi = None
     if getattr(model, 'use_roi', False):
-        roi = _resolve_roi(roi_path, img_path, config)
+        roi = _resolve_roi(roi_path, img_path, config, roi_idx=roi_idx)
         if roi is None:
             raise FileNotFoundError(
                 f"model has use_roi=True but no ROI found for {img_path.name}. "
@@ -211,11 +219,18 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
     # If the model saw a context patch larger than the stitch tile, crop predictions
     # back to the centered tile_size region before stitching.
     if probs_tiles.shape[-1] != tile_size:
-        cs = probs_tiles.shape[-1]
-        off = (cs - tile_size) // 2
+        off = (probs_tiles.shape[-1] - tile_size) // 2
         probs_tiles = probs_tiles[..., off:off + tile_size, off:off + tile_size]
 
-    prob_map = stitch(list(probs_tiles), ys, xs, H, W, tile_size, stride)
+    # Stitch only kept tiles so excluded-tile zeros don't dilute predictions in
+    # overlap regions near the ROI exclusion boundary.
+    prob_canvas = torch.zeros(H, W)
+    prob_count  = torch.zeros(H, W)
+    for i in keep_idx:
+        ty, tx = tile_coords[i]
+        prob_canvas[ty:ty+tile_size, tx:tx+tile_size] += probs_tiles[i]
+        prob_count[ty:ty+tile_size,  tx:tx+tile_size] += 1
+    prob_map = prob_canvas / prob_count.clamp(min=1)
     pred_map = (prob_map > threshold).float()
 
     # ── figure ───────────────────────────────────────────────────────────────
@@ -305,19 +320,19 @@ def main(args):
         print(f"Found {len(pairs)} image/mask pairs")
         uses_roi = getattr(model, 'use_roi', False)
         for i, (img_path, mask_path) in enumerate(pairs):
-            if uses_roi and _resolve_roi(None, img_path, raw_config) is None:
+            if uses_roi and _resolve_roi(None, img_path, raw_config, roi_idx=args.roi_idx) is None:
                 print(f"  [{i+1}/{len(pairs)}] {img_path.name}: no ROI found — skipping")
                 continue
             title = f"{img_path.name}  [{i+1}/{len(pairs)}]"
             out = str(save_dir / f"{img_path.stem}.png") if save_dir else args.output
             run_one(img_path, mask_path, model, device, p, args.threshold, title,
-                    out, roi_path=None, config=raw_config)
+                    out, roi_path=None, config=raw_config, roi_idx=args.roi_idx)
     else:
         img_path  = Path(args.image)
         mask_path = Path(args.mask) if args.mask else None
         out = str(save_dir / f"{img_path.stem}.png") if save_dir else args.output
         run_one(img_path, mask_path, model, device, p, args.threshold, img_path.name,
-                out, roi_path=args.roi, config=raw_config)
+                out, roi_path=args.roi, config=raw_config, roi_idx=args.roi_idx)
 
 
 if __name__ == '__main__':
@@ -335,6 +350,9 @@ if __name__ == '__main__':
     parser.add_argument('--roi',          default=None,
                         help='path to roi_<stem>.pt (required if model was trained with use_roi=true; '
                              'if omitted, inference will try data_dir/images/<stem>/roi_<stem>.pt)')
+    parser.add_argument('--roi-idx',      default=None, type=int,
+                        help='select which annotated ROI to use: 0=roi_<stem>.pt, 1=roi_<stem>_1.pt, etc. '
+                             '(default: 0 / primary)')
     parser.add_argument('--output',       default=None,  help='save figure here instead of displaying')
     parser.add_argument('--savefigs',     action='store_true',
                         help='save all figures to saved/log/<name>/<run_id>/inference/ instead of displaying')
