@@ -653,7 +653,7 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9B.json
     Expected: matches or modestly beats 8M; encoder adaptation should help boundary/sloppy-ROI cases, half lr should
     avoid catastrophic forgetting of ImageNet features at this dataset scale
-    Results:
+    Results: Inferior results, divergence
 
 
     [EXPERIMENT 9C] - fine-tune the ENTIRE local encoder at half lr
@@ -669,4 +669,65 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     Expected: if 9B helped, 9C either matches it (gain was in the deep stage) or overfits and regresses (shallow
     stages had nothing useful to learn / not enough data); if 9B did nothing, 9C is the stronger test of whether the
     encoder is the bottleneck at all
+    Results: inferior results, divergence
+
+
+    [EXPERIMENT 9D] - multi-scale ROI injection (inject at decoder skips)
+    couplet with [EXPERIMENT 8M]: frozen ImageNet encoder (9B/9C showed fine-tuning the encoder diverges, so the
+    encoder is NOT the bottleneck), same data/augs/loss/optimizer. The only change is WHERE the ROI enters the net.
+    finding that motivated this: the ROI is stored at 256x256 for the whole 8192 tiling image, so a single 512 tile
+    only sees ~16x16 ROI pixels, and until now that crop was injected once at the /32 bottleneck (also 16x16). One ROI
+    pixel therefore covers a ~32x32 block of the tile, so a closed pocket of tissue smaller than that block is
+    unrepresentable and cannot be excluded - the exact failure mode observed (model includes pockets inside the ROI).
+    impl: ImageNetPretrainedLocalUNet now takes roi_inject ('bottleneck' default | 'skips') and roi_interp
+    ('bilinear' default | 'nearest'). 'skips' additionally fuses the (cropped) ROI at every decoder concat
+    (/16,/8,/4,/2,/1) on top of the bottleneck injection, so ROI detail reaches the resolution where pixel decisions
+    are made; each dec conv gains roi_ch input channels. roi_interp='nearest' upsamples the existing low-res 256x256
+    ROIs without blurring (honest blocky guidance) - if this helps, ROIs will be re-annotated at higher resolution.
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9D.json
+    Expected: better exclusion of closed tissue pockets / sloppy-ROI false positives vs 8M, since fine-scale ROI is
+    now available to the decoder; caveat - nearest upsampling of a 256x256 ROI still cannot resolve sub-32px pockets,
+    so a positive-but-limited result would justify re-annotating ROIs at higher resolution
+    Results: WORSE (val_iou 0.922 vs 8M 0.946), and implementation verified correct (aug/pos alignment exact to
+    0.0000 across all flip/rot combos, channel bookkeeping checked, backward-compatible). Root cause is a learning
+    shortcut, not a bug: with the ROI wired at full res next to the output, the decoder hits val_iou=0.88 on EPOCH 1
+    (vs 8M's 0.51) - it is copying the ROI, not learning from image features. It then plateaus below 8M with a wider
+    train/val gap (train 0.969 / val 0.922). Because the ROIs are sloppy and the pockets are INSIDE them, copying the
+    ROI harder reproduces the pockets more and caps performance at ROI quality - the opposite of what's needed.
+    Conclusion: fine-scale ROI injection is the wrong lever; the model must OVERRIDE the ROI via image features.
+    Next: loss-side (focal tversky to punish small FP pockets) and/or forced ROI distrust (roi_dropout/roi_distort).
+
+
+    [EXPERIMENT 9E] - Tversky loss (punish false positives harder than misses)
+    couplet with [EXPERIMENT 8M]: identical (frozen encoder, bottleneck ROI, single ROI) except the region loss.
+    8M uses bce_dice (a=0.3 -> 0.3 BCE + 0.7 Dice). Dice weights false positives and false negatives equally, so a
+    small spurious pocket is barely penalised (the "dice too lenient" note from 8O). Tversky generalises Dice with
+    separate FP weight alpha and FN weight beta (alpha=beta=0.5 IS Dice); 9E uses bce_tversky a=0.3, alpha=0.7,
+    beta=0.3 - same BCE/region split as 8M but the region term now punishes FP ~2.3x harder than FN, nudging the
+    model to carve out pockets instead of including them.
+    impl: added tversky_loss/focal_tversky_loss/bce_tversky to model/loss.py (shared _tversky_index helper);
+    loss dict form already supported since 9A.
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9E.json
+    Expected: fewer false-positive pockets / cleaner exclusion vs 8M, possibly slightly lower recall; if alpha=0.7 is
+    too aggressive it will under-segment (tune alpha down toward 0.5)
+    Results:
+
+
+    [EXPERIMENT 9F] - size-weighted small-pocket penalty
+    couplet with [EXPERIMENT 8M]: identical except loss = bce_dice_pocket (bce_dice + pocket_weight * small_fp_loss).
+    motivation: Tversky penalises ALL false-positive area uniformly; this term instead scales the penalty by how
+    SMALL the spurious blob is - exactly the request that a 2px enclosed pocket should score very high and a large
+    structure very low. small_fp_loss labels connected components of the thresholded prediction, flags those with
+    target-overlap < overlap_thresh as false positives, and weights each by exp(-size/tau) (~1 for 1-2px, ~0 for
+    large); loss is the weighted-mean predicted prob over those pixels so gradient pushes foreground down hardest in
+    the tiniest pockets. component labelling is done under no_grad (constants); gradient flows only through the probs.
+    verified: 2x2 FP blob -> 1.000, 20x20 FP blob -> 0.000.
+    impl: small_fp_loss + bce_dice_pocket in model/loss.py (scipy.ndimage.label). 9F: a=0.3, pocket_weight=1.0,
+    tau=8.0, overlap_thresh=0.5.
+    CAVEAT: this only catches ISOLATED small FP blobs (separated from the main mask by background). A pocket that is
+    a filled hole inside the main foreground is part of the large component and is NOT penalised - if the real pockets
+    are holes, a hole-detection variant is needed instead.
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9F.json
+    Expected: suppresses small spurious specks/pockets more selectively than 9E without the global under-segmentation
+    risk of a high Tversky alpha; tune pocket_weight/tau if it over- or under-corrects
     Results:

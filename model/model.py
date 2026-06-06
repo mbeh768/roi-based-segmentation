@@ -29,11 +29,12 @@ def _inverse_geo_feat(x, g):
     return torch.cat(out, dim=0)
 
 
-def _crop_and_resize(feat, pos, out_h, out_w):
+def _crop_and_resize(feat, pos, out_h, out_w, mode='bilinear'):
     """
     Differentiably crop feat (B, C, H, W) at the normalised region
     pos (B, 4) = [y0, x0, y1, x1] in [0, 1], then resize to (out_h, out_w)
-    using bilinear interpolation via F.grid_sample.
+    via F.grid_sample. mode='bilinear' (default) for smooth feature maps;
+    mode='nearest' keeps a low-res binary ROI crisp when upsampled.
     """
     B, _, H, W = feat.shape
     y0, x0, y1, x1 = pos[:, 0], pos[:, 1], pos[:, 2], pos[:, 3]
@@ -52,7 +53,8 @@ def _crop_and_resize(feat, pos, out_h, out_w):
         gy.view(B, out_h, 1).expand(B, out_h, out_w),
     ], dim=-1)  # (B, out_h, out_w, 2)
 
-    return F.grid_sample(feat, grid, mode='bilinear', align_corners=True, padding_mode='border')
+    # align_corners only applies to bilinear; grid_sample ignores it for nearest.
+    return F.grid_sample(feat, grid, mode=mode, align_corners=True, padding_mode='border')
 
 
 def _double_conv(in_ch, out_ch):
@@ -444,11 +446,28 @@ class ImageNetPretrainedLocalUNet(BaseModel):
                  backbone='resnet18', backbone_pretrained=True,
                  freeze_local_encoder=False,
                  bottleneck_dropout=0.1,
-                 use_roi=False, roi_ch=1):
+                 use_roi=False, roi_ch=1,
+                 roi_inject='bottleneck', roi_interp='bilinear'):
         super().__init__()
 
         self.use_roi = use_roi
         self.roi_ch = roi_ch if use_roi else 0
+
+        # roi_inject controls where the ROI guidance enters the decoder:
+        #   'bottleneck' (default) — single coarse crop at /32, original behaviour.
+        #   'skips'                — additionally fused at every decoder concat
+        #                            (/16,/8,/4,/2,/1) so fine ROI detail reaches
+        #                            the resolution where pixel decisions are made.
+        # roi_interp is the resampling mode for ROI crops ('nearest' keeps a
+        # low-res binary ROI crisp when upsampled; 'bilinear' for the legacy path).
+        if roi_inject not in ('bottleneck', 'skips'):
+            raise ValueError(f"roi_inject must be 'bottleneck' or 'skips', got {roi_inject!r}")
+        if roi_interp not in ('bilinear', 'nearest'):
+            raise ValueError(f"roi_interp must be 'bilinear' or 'nearest', got {roi_interp!r}")
+        self.roi_inject = roi_inject
+        self.roi_interp = roi_interp
+        skip_roi_ch = self.roi_ch if (use_roi and roi_inject == 'skips') else 0
+        self.skip_roi_ch = skip_roi_ch
 
         self.backbone = timm.create_model(
             backbone, pretrained=backbone_pretrained, features_only=True,
@@ -483,15 +502,15 @@ class ImageNetPretrainedLocalUNet(BaseModel):
         self.bot_drop = nn.Dropout2d(bottleneck_dropout)
 
         self.up5  = nn.ConvTranspose2d(c5 + self.roi_ch, c4, kernel_size=2, stride=2)
-        self.dec5 = _double_conv(c4 + c4, c4)
+        self.dec5 = _double_conv(c4 + c4 + skip_roi_ch, c4)
         self.up4  = nn.ConvTranspose2d(c4, c3, kernel_size=2, stride=2)
-        self.dec4 = _double_conv(c3 + c3, c3)
+        self.dec4 = _double_conv(c3 + c3 + skip_roi_ch, c3)
         self.up3  = nn.ConvTranspose2d(c3, c2, kernel_size=2, stride=2)
-        self.dec3 = _double_conv(c2 + c2, c2)
+        self.dec3 = _double_conv(c2 + c2 + skip_roi_ch, c2)
         self.up2  = nn.ConvTranspose2d(c2, c1, kernel_size=2, stride=2)
-        self.dec2 = _double_conv(c1 + c1, c1)
+        self.dec2 = _double_conv(c1 + c1 + skip_roi_ch, c1)
         self.up1  = nn.ConvTranspose2d(c1, c1, kernel_size=2, stride=2)
-        self.dec1 = _double_conv(c1, c1)
+        self.dec1 = _double_conv(c1 + skip_roi_ch, c1)
 
         self.head = nn.Conv2d(c1, num_classes, kernel_size=1)
 
@@ -500,17 +519,32 @@ class ImageNetPretrainedLocalUNet(BaseModel):
         # but not used; same for pos when use_roi=False.
         s1, s2, s3, s4, x = self.backbone(local)
 
+        inject_skips = self.use_roi and self.roi_inject == 'skips'
         if self.use_roi:
             assert roi is not None, "use_roi=True but no roi tensor was passed to forward()"
-            roi_ctx = _crop_and_resize(roi, pos, *x.shape[2:])
-            x = torch.cat([x, roi_ctx], dim=1)
 
-        x = self.dec5(torch.cat([self.up5(x), s4], dim=1))
+        def roi_at(h, w):
+            # crop the per-image ROI to this tile (pos) and resample to (h, w)
+            return _crop_and_resize(roi, pos, h, w, mode=self.roi_interp)
+
+        if self.use_roi:
+            x = torch.cat([x, roi_at(*x.shape[2:])], dim=1)
+
+        def fuse(up, skip):
+            parts = [up, skip]
+            if inject_skips:
+                parts.append(roi_at(*up.shape[2:]))
+            return torch.cat(parts, dim=1)
+
+        x = self.dec5(fuse(self.up5(x), s4))
         x = self.bot_drop(x)
-        x = self.dec4(torch.cat([self.up4(x), s3], dim=1))
-        x = self.dec3(torch.cat([self.up3(x), s2], dim=1))
-        x = self.dec2(torch.cat([self.up2(x), s1], dim=1))
-        x = self.dec1(self.up1(x))
+        x = self.dec4(fuse(self.up4(x), s3))
+        x = self.dec3(fuse(self.up3(x), s2))
+        x = self.dec2(fuse(self.up2(x), s1))
+        u1 = self.up1(x)
+        if inject_skips:
+            u1 = torch.cat([u1, roi_at(*u1.shape[2:])], dim=1)
+        x = self.dec1(u1)
 
         return self.head(x)
 

@@ -1,5 +1,7 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy import ndimage
 
 
 def _crop_to_target(output, target):
@@ -33,6 +35,93 @@ def dice_loss(output, target, eps=1e-6):
 def bce_dice(output, target, a=0.3):
     """Combined BCE + Dice. Output may be larger than target (center-cropped automatically)."""
     return a * bce(output, target) + (1 - a) * dice_loss(output, target)
+
+
+def _tversky_index(output, target, alpha, beta, eps=1e-6):
+    """Per-image Tversky index in [0, 1] (1 = perfect). alpha weights false
+    positives, beta false negatives; alpha=beta=0.5 is the Dice coefficient."""
+    output = _crop_to_target(output, target)
+    probs = torch.sigmoid(output)
+
+    dims = (1, 2, 3)    # per image, then average over batch by the caller
+    tp = (probs * target).sum(dims)
+    fp = (probs * (1 - target)).sum(dims)
+    fn = ((1 - probs) * target).sum(dims)
+
+    return (tp + eps) / (tp + alpha * fp + beta * fn + eps)
+
+
+def tversky_loss(output, target, alpha=0.7, beta=0.3, eps=1e-6):
+    """Tversky loss: a generalised Dice that weights false positives (alpha) and
+    false negatives (beta) separately. alpha=beta=0.5 reduces to Dice; alpha>beta
+    punishes over-segmentation (spurious foreground) harder, which is the lever
+    for excluding tissue pockets the model wrongly includes."""
+    return (1 - _tversky_index(output, target, alpha, beta, eps)).mean()
+
+
+def focal_tversky_loss(output, target, alpha=0.7, beta=0.3, gamma=1.3333, eps=1e-6):
+    """Focal Tversky: (1 - Tversky)^gamma. gamma>1 down-weights easy, well-covered
+    tiles and concentrates gradient on hard, low-overlap ones — empirically better
+    for small structures / thin boundaries. gamma=1 recovers plain tversky_loss."""
+    return ((1 - _tversky_index(output, target, alpha, beta, eps)) ** gamma).mean()
+
+
+def bce_tversky(output, target, a=0.3, alpha=0.7, beta=0.3):
+    """BCE + Tversky, mirroring bce_dice. With alpha=beta=0.5 this IS bce_dice;
+    alpha=0.7/beta=0.3 keeps the same BCE/region balance as 8M but makes the
+    region term penalise false positives ~2.3x harder than misses."""
+    return a * bce(output, target) + (1 - a) * tversky_loss(
+        output, target, alpha=alpha, beta=beta)
+
+
+def small_fp_loss(output, target, tau=8.0, overlap_thresh=0.5, eps=1e-6):
+    """Penalise *small* spurious foreground blobs much more than large ones.
+
+    For each connected component of the thresholded prediction whose overlap with
+    the target is below overlap_thresh (i.e. a false-positive blob), every pixel
+    gets weight exp(-size/tau): ~1 for a 1-2 px pocket, ~0 for a large structure.
+    The loss is the weighted-mean predicted probability over those pixels, so the
+    gradient pushes foreground down hardest in the smallest pockets and barely
+    touches large/true regions. tau sets the size (px) below which pockets are
+    heavily punished.
+
+    Component labelling/sizing is done under no_grad (treated as constants);
+    gradient flows only through the probabilities. This term has NO true-positive
+    signal, so it must be added to an overlap loss (see bce_dice_pocket).
+
+    NOTE: this targets ISOLATED small false-positive blobs. A pocket that is a
+    filled hole *inside* the main foreground (no separating background ring) is
+    part of the large component and is not penalised by this term.
+    """
+    output = _crop_to_target(output, target)
+    probs = torch.sigmoid(output)
+    with torch.no_grad():
+        pred_bin = (probs > 0.5).cpu().numpy()
+        tgt_bin = (target > 0.5).float().cpu().numpy()
+        w = np.zeros(pred_bin.shape, dtype=np.float32)
+        for b in range(pred_bin.shape[0]):
+            lab, n = ndimage.label(pred_bin[b, 0])
+            if n == 0:
+                continue
+            idx = np.arange(1, n + 1)
+            sizes = ndimage.sum(np.ones(lab.shape, np.float32), lab, idx)
+            tp = ndimage.sum(tgt_bin[b, 0], lab, idx)
+            overlap = tp / (sizes + eps)
+            weight_per_label = np.where(
+                overlap < overlap_thresh, np.exp(-sizes / tau), 0.0
+            ).astype(np.float32)
+            lut = np.concatenate([[0.0], weight_per_label])  # label 0 = background
+            w[b, 0] = lut[lab]
+        weights = torch.from_numpy(w).to(probs.device)
+    return (weights * probs).sum() / (weights.sum() + eps)
+
+
+def bce_dice_pocket(output, target, a=0.3, pocket_weight=1.0, tau=8.0,
+                    overlap_thresh=0.5):
+    """bce_dice plus a small-false-positive-blob penalty (see small_fp_loss).
+    pocket_weight scales how aggressively small spurious pockets are suppressed."""
+    return bce_dice(output, target, a=a) + pocket_weight * small_fp_loss(
+        output, target, tau=tau, overlap_thresh=overlap_thresh)
 
 
 def mse(output, target):
