@@ -40,13 +40,14 @@ def load_model(checkpoint_path):
     return model, device, config
 
 
-def tif_to_tensor(path, config, is_mask=False):
+def tif_to_tensor(path, config, is_mask=False, scene_index=0):
     """Load a TIFF and return a (C, H, W) float32 tensor via the preprocess pipeline."""
     p = Preprocessor(config)
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
     imagenet_norm = config['preprocess'].get('imagenet_norm', False) if not is_mask else False
     arr = p.load_and_format(path, interp, standardize=not is_mask,
-                            is_mask=is_mask, imagenet_norm=imagenet_norm)
+                            is_mask=is_mask, imagenet_norm=imagenet_norm,
+                            scene_index=scene_index)
     if not is_mask and config['preprocess'].get('collapse', False):
         arr = p.collapse_channels(arr)
     return torch.from_numpy(arr)
@@ -57,7 +58,7 @@ def to_display(tensor):
     return Preprocessor(None)._make_vis(tensor.cpu().float().numpy())
 
 
-def tif_to_tiles(path, p, is_mask=False):
+def tif_to_tiles(path, p, is_mask=False, scene_index=0):
     """Load TIFF at tiling_size resolution and cut into tiles.
 
     Image tiles are extracted at context_size (centered on the inner tile_size region);
@@ -72,7 +73,7 @@ def tif_to_tiles(path, p, is_mask=False):
     imagenet_norm = p.c['preprocess'].get('imagenet_norm', False)
     arr = p.load_and_format(path, interp, standardize=not is_mask,
                             is_mask=is_mask, target_size=tiling_size,
-                            imagenet_norm=imagenet_norm)
+                            imagenet_norm=imagenet_norm, scene_index=scene_index)
     if not is_mask and p.c['preprocess'].get('collapse', False):
         arr = p.collapse_channels(arr)
 
@@ -136,18 +137,31 @@ def _resolve_roi(roi_arg, img_path, config, roi_idx=None):
     return None
 
 
-def run_one(img_path, mask_path, model, device, p, threshold, title, output=None,
-            roi_path=None, config=None, roi_idx=None):
-    print(f"\nPreprocessing {img_path.name}...")
-    tiles, ys, xs, H, W, tile_size, stride, full_arr = tif_to_tiles(img_path, p, is_mask=False)
-    glob = tif_to_tensor(img_path, p.c, is_mask=False)   # (3, global_H, global_W)
+def predict_prob_map(img_path, model, device, p, config, roi_path=None, roi_idx=None,
+                     scene_index=0, roi=None):
+    """Run the model over all tiles of an image and stitch the probabilities.
 
-    mask_stitched = None
-    if mask_path is not None:
-        print(f"Preprocessing mask {mask_path.name}...")
-        m_tiles, *m_rest = tif_to_tiles(mask_path, p, is_mask=True)
-        m_ys, m_xs, m_H, m_W, m_ts, m_st = m_rest[:6]
-        mask_stitched = stitch([t.squeeze() for t in m_tiles], m_ys, m_xs, m_H, m_W, m_ts, m_st)
+    This is the matplotlib-free core of ``run_one`` so it can be reused by other
+    tools (e.g. pipeline.py).
+
+    Args:
+        roi (torch.Tensor|None): an explicit (1, H, W) float32 ROI to feed the model,
+            bypassing the saved-file lookup. Only used when the model has use_roi=True.
+            When None, the ROI is auto-resolved from roi_path / data_dir (legacy).
+
+    Returns:
+        prob_map (torch.Tensor): (H, W) sigmoid probabilities on the tiling-size
+            square canvas (H == W == tiling_size, content in the top-left
+            new_H x new_W region with the rest zero-padded).
+        info (dict): plotting/analysis context with keys ``full_arr`` (CHW float32
+            of the input rendered at tiling_size), ``tile_coords``, ``keep_idx``,
+            ``tile_size``, ``H``, ``W`` and ``roi`` (or None).
+    """
+    print(f"\nPreprocessing {img_path.name}...")
+    tiles, ys, xs, H, W, tile_size, stride, full_arr = tif_to_tiles(
+        img_path, p, is_mask=False, scene_index=scene_index)
+    glob = tif_to_tensor(img_path, p.c, is_mask=False,
+                         scene_index=scene_index)         # (3, global_H, global_W)
 
     N = len(tiles)
     local_all = torch.stack(tiles)                                 # (N, 3, tile_H, tile_W) on CPU
@@ -163,14 +177,16 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         for y in ys for x in xs
     ])                                                              # (N, 4) on CPU
 
-    roi = None
     if getattr(model, 'use_roi', False):
-        roi = _resolve_roi(roi_path, img_path, config, roi_idx=roi_idx)
+        if roi is None:
+            roi = _resolve_roi(roi_path, img_path, config, roi_idx=roi_idx)
         if roi is None:
             raise FileNotFoundError(
                 f"model has use_roi=True but no ROI found for {img_path.name}. "
                 f"Pass --roi <path/to/roi_<stem>.pt> or run annotate_globals.py."
             )
+    else:
+        roi = None
 
     # Build a keep-mask over tiles from ROI exclusion (matches dataset filter).
     dl_args = (config or {}).get('data_loader', {}).get('args', {})
@@ -231,6 +247,37 @@ def run_one(img_path, mask_path, model, device, p, threshold, title, output=None
         prob_canvas[ty:ty+tile_size, tx:tx+tile_size] += probs_tiles[i]
         prob_count[ty:ty+tile_size,  tx:tx+tile_size] += 1
     prob_map = prob_canvas / prob_count.clamp(min=1)
+
+    info = {
+        'full_arr': full_arr,
+        'tile_coords': tile_coords,
+        'keep_idx': keep_idx,
+        'tile_size': tile_size,
+        'H': H,
+        'W': W,
+        'roi': roi,
+    }
+    return prob_map, info
+
+
+def run_one(img_path, mask_path, model, device, p, threshold, title, output=None,
+            roi_path=None, config=None, roi_idx=None):
+    prob_map, info = predict_prob_map(img_path, model, device, p, config,
+                                      roi_path=roi_path, roi_idx=roi_idx)
+    full_arr    = info['full_arr']
+    tile_coords = info['tile_coords']
+    keep_idx    = info['keep_idx']
+    tile_size   = info['tile_size']
+    H, W        = info['H'], info['W']
+    roi         = info['roi']
+
+    mask_stitched = None
+    if mask_path is not None:
+        print(f"Preprocessing mask {mask_path.name}...")
+        m_tiles, *m_rest = tif_to_tiles(mask_path, p, is_mask=True)
+        m_ys, m_xs, m_H, m_W, m_ts, m_st = m_rest[:6]
+        mask_stitched = stitch([t.squeeze() for t in m_tiles], m_ys, m_xs, m_H, m_W, m_ts, m_st)
+
     pred_map = (prob_map > threshold).float()
 
     # ── figure ───────────────────────────────────────────────────────────────

@@ -113,12 +113,16 @@ class Preprocessor:
 
         return image                                  # CHW original dtype
 
-    def _load_czi(self, path, scene_index=0):
+    def _load_czi(self, path, scene_index=0, zoom=None):
         '''Load CZI image as CHW array, zoomed so pixel count doesn't exceed czi_max_px.
 
         Args:
             scene_index (int): index into czidoc.scenes_bounding_rectangle.
                 Defaults to 0; pass via --namescsv second column to pick a specific scene.
+            zoom (float|None): explicit pyramid zoom factor in (0, 1]. When given, the
+                czi_max_px halving loop is skipped and the image is read at this zoom.
+                When None (default), zoom is chosen automatically so the pixel count
+                doesn't exceed config['preprocess']['czi_max_px'].
 
         Requires: pylibCZIrw  (pip install pylibCZIrw)
         '''
@@ -130,9 +134,10 @@ class Preprocessor:
             H = bb['Y'][1] - bb['Y'][0]
             W = bb['X'][1] - bb['X'][0]
             n_channels = bb['C'][1] - bb['C'][0] if 'C' in bb else 1
-            zoom = 1.0
-            while zoom > 0.0 and (H * zoom) * (W * zoom) > _max_czi_px:
-                zoom *= 0.5
+            if zoom is None:
+                zoom = 1.0
+                while zoom > 0.0 and (H * zoom) * (W * zoom) > _max_czi_px:
+                    zoom *= 0.5
             print(f"\tczi image dimensions: {H}x{W} ({H*W:.2e} px), {n_channels} channel(s), pyramid zoom: {zoom} -> {int(H*zoom)}x{int(W*zoom)} ({H*zoom*W*zoom:.2e} px)\n")
             scenes = list(czidoc.scenes_bounding_rectangle.keys())
             if scenes:

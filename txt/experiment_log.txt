@@ -741,7 +741,7 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9G.json
     Expected: stable (no divergence), but ~1.2x bce_dice at specks may be too weak to beat the leniency that caused
     the speck problem in the first place - i.e. little change from 8M
-    Results:
+    Results: better, but still unstable gradients and spiky loss
 
 
     [EXPERIMENT 9H] - pocket_weight lambda=0.2
@@ -749,4 +749,10 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9H.json
     Expected: likeliest sweet spot - stable, and clearly stronger than the bce_dice signal that fails to suppress
     specks today without 9F's over-correction; should cut false-positive specks with minimal cost to true boundaries
-    Results:
+    Results: worse than 9G
+
+
+    --- At this point i started doing UI work ---
+
+
+    [EXPERIMENT 9I] Try forwarding fewer tiles

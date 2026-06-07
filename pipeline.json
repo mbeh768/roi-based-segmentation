@@ -1,0 +1,14 @@
+{
+    "model": "saved/models/EXPERIMENT 9H/model_best.pth",
+    "config": "config.json",
+    "image": "/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26/Sirius Red Jan 2026 (infarcted pig hearts)/25P384-1.czi",
+    "pyramid": 0.0625,
+    "threshold": 0.5,
+    "scene": 0,
+    "microns_per_pixel": null,
+    "band_microns": 100.0,
+    "palette_size": 8,
+    "outdir": null,
+    "save_max": 8192,
+    "alpha": 0.5
+}
