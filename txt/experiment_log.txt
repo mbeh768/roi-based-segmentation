@@ -710,7 +710,7 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9E.json
     Expected: fewer false-positive pockets / cleaner exclusion vs 8M, possibly slightly lower recall; if alpha=0.7 is
     too aggressive it will under-segment (tune alpha down toward 0.5)
-    Results:
+    Results: 
 
 
     [EXPERIMENT 9F] - size-weighted small-pocket penalty
@@ -730,4 +730,23 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9F.json
     Expected: suppresses small spurious specks/pockets more selectively than 9E without the global under-segmentation
     risk of a high Tversky alpha; tune pocket_weight/tau if it over- or under-corrects
+    Results: divergence
+
+
+    [EXPERIMENT 9G] - pocket_weight lambda=0.1
+    couplet with [EXPERIMENT 9F]: identical (8M base, bce_dice_pocket, a=0.3, tau=8, overlap_thresh=0.5) except
+    pocket_weight=0.1. 9F at lambda=1.0 diverged - measuring the gradient on a near-correct prediction showed the
+    pocket term is spatially sparse (lands only on false-positive speck pixels) but at lambda=1.0 hits those pixels
+    ~12x harder than bce_dice, more sledgehammer than needed. lambda=0.1 brings that to ~1.2x at the specks.
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9G.json
+    Expected: stable (no divergence), but ~1.2x bce_dice at specks may be too weak to beat the leniency that caused
+    the speck problem in the first place - i.e. little change from 8M
+    Results:
+
+
+    [EXPERIMENT 9H] - pocket_weight lambda=0.2
+    couplet with [EXPERIMENT 9G]: identical except pocket_weight=0.2 (~2.4x bce_dice gradient at the speck pixels).
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9H.json
+    Expected: likeliest sweet spot - stable, and clearly stronger than the bce_dice signal that fails to suppress
+    specks today without 9F's over-correction; should cut false-positive specks with minimal cost to true boundaries
     Results:
