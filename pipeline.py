@@ -1,18 +1,20 @@
 """
 End-to-end segmentation + distance-band analysis for a single .czi slide.
 
-Everything is driven by a pipeline.json config file (no CLI flags). Given a model
-checkpoint, the training config (for preprocess/tiling params), and one .czi image
+Everything is driven by a pipeline.json config file (no CLI flags). Preprocess/tiling
+params come from the config embedded in the checkpoint (so they always match the model;
+pipeline.json "config" is an optional override). Given a model checkpoint and one .czi
 this script:
 
-  1. Runs the LocalGlobalUNet segmentation (tiles forwarded at tiling_size, as trained).
+  1. Prompts the user to draw an ROI, then runs the segmentation (tiles forwarded at the
+     model's trained tiling_size).
   2. Crops the zero-padding the preprocessing introduced from the predicted mask.
-  3. Upsamples the cropped mask to the slide pixel grid (aspect ratio preserved) at a
-     chosen pyramid zoom, so it aligns perfectly with the displayed image.
+  3. Upsamples the cropped mask to the slide pixel grid (aspect ratio preserved); the
+     working resolution is chosen so the output's longest side ~= target_longest_side.
   4. Saves an overlay of the mask on the image at alpha 0.5  (mask_overlay.png).
   5. Reads the slide's physical pixel size (microns/pixel) from the CZI scaling metadata
-     and grows concentric bands (default 100 um wide) outward from the ventricle
-     foreground, out to the image edge, colored with a cycling palette
+     and shades the foreground (band 0) plus sequential outward distance bands whose
+     thicknesses are given by the `bands` array, colored with a cycling palette
      (band_overlay.png).
 
 Usage:
@@ -41,14 +43,16 @@ from annotate_globals import (BrushROIDrawer, _apply_gamma, _draw_banner,
 
 # ── config ────────────────────────────────────────────────────────────────────
 DEFAULTS = {
-    "pyramid": None,            # zoom factor 0<z<=1; None -> czi_max_px halving loop
+    "target_longest_side": 8000,  # zoom is auto-picked so the output's longest side ~= this (memory-safe on huge slides)
     "threshold": 0.5,
     "scene": 0,
     "microns_per_pixel": None,  # override the slide's NATIVE um/px (None -> read metadata)
-    "band_microns": 100.0,
+    "keep_connected": 0,        # keep only the N largest foreground blobs (0/null -> keep all)
+    "bands": [100],             # sequential band thicknesses (microns) outward from fg, e.g.
+                                #   [100,100,100,100,100] -> 5 bands of 100um;  [10,20,30] -> bands of 10,20,30um
     "palette_size": 8,
     "outdir": None,             # None -> saved/pipeline/<stem>/
-    "save_max": 8192,           # cap longest side of SAVED pngs (analysis is full-res)
+    "save_max": 8192,           # cap longest side of SAVED pngs
     "alpha": 0.5,
     "roi_canvas_size": 768,     # interactive ROI drawing window size (px)
     "roi_brush_radius": 8,      # initial ROI brush radius (canvas px)
@@ -58,15 +62,13 @@ DEFAULTS = {
 def load_pipeline_config(path):
     with open(path) as f:
         pp = json.load(f)
-    for required in ("model", "config", "image"):
+    for required in ("model", "image"):
         if required not in pp:
             raise KeyError(f"pipeline config '{path}' is missing required key '{required}'")
     cfg = dict(DEFAULTS)
     cfg.update(pp)
-    if cfg["pyramid"] is not None:
-        z = float(cfg["pyramid"])
-        if not (0.0 < z <= 1.0):
-            raise ValueError(f"pyramid must be in (0, 1], got {z}")
+    if not cfg.get("bands"):
+        raise ValueError("pipeline config 'bands' must be a non-empty list of band widths (microns)")
     return cfg
 
 
@@ -214,6 +216,22 @@ def prompt_for_roi(canvas_bgr, target_size, brush_radius=8):
     return result
 
 
+def keep_largest_blobs(fg, n):
+    """Keep only the `n` largest connected components of a boolean mask, dropping the
+    rest. n in (None, 0, negative) -> keep everything. Returns (mask, n_removed)."""
+    if not n or n <= 0:
+        return fg, 0
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(
+        fg.astype(np.uint8), connectivity=8)
+    n_blobs = num - 1                                   # label 0 is background
+    if n_blobs <= n:
+        return fg, 0
+    areas = stats[1:, cv2.CC_STAT_AREA]                 # area per blob (labels 1..num-1)
+    keep = np.argsort(areas)[::-1][:n] + 1             # label ids of the n biggest
+    out = np.isin(labels, keep)
+    return out, n_blobs - n
+
+
 # ── overlays ────────────────────────────────────────────────────────────────────
 def cycling_palette(k):
     """k distinct RGB colors (float [0,1]) spread over the hue circle."""
@@ -254,12 +272,21 @@ def main(pp):
     img_path = Path(pp["image"])
     scene = int(pp["scene"])
 
-    # training config (preprocess + tiling params)
-    with open(pp["config"]) as f:
-        cfg = json.load(f)
-    p = Preprocessor(cfg)
+    model, device, ckpt_config = load_model(pp["model"])
 
-    model, device, _ = load_model(pp["model"])
+    # Preprocess/tiling params MUST match what the model was trained with, so default
+    # to the config embedded in the checkpoint. pipeline.json "config" is an optional
+    # override only (advanced use); mismatched tiling collapses the segmentation.
+    if pp.get("config"):
+        with open(pp["config"]) as f:
+            cfg = json.load(f)
+        print(f"using preprocess config from {pp['config']} (override)")
+    else:
+        cfg = ckpt_config.config
+        print(f"using preprocess config embedded in checkpoint "
+              f"(tiling_size={cfg['preprocess']['tiling_size']}, "
+              f"tile_size={cfg['preprocess']['tile_size']})")
+    p = Preprocessor(cfg)
 
     # native dims + physical scale
     H, W, um_x, um_y = czi_native_dims_and_scale(img_path, scene_index=scene)
@@ -280,21 +307,16 @@ def main(pp):
         native_um = um_x
         print(f"native microns/pixel: {native_um:.4f}  (from metadata)")
 
-    # resolve pyramid zoom
-    if pp["pyramid"] is not None:
-        z = float(pp["pyramid"])
-        print(f"pyramid zoom: {z}  (from config)")
-    else:
-        czi_max_px = cfg["preprocess"]["czi_max_px"]
-        z = 1.0
-        while z > 0.0 and (H * z) * (W * z) > czi_max_px:
-            z *= 0.5
-        print(f"pyramid zoom: {z}  (halving loop, czi_max_px={czi_max_px:.2e})")
+    # pick the pyramid zoom so the output's longest side ~= target_longest_side
+    # (never upscale past native: zoom capped at 1.0)
+    target = int(pp["target_longest_side"])
+    z = min(1.0, target / max(H, W))
+    print(f"target longest side: {target}px -> pyramid zoom: {z:.5f}")
 
     dt_gb = (H * z) * (W * z) * 4 / 1e9
     if dt_gb > 12:
-        print(f"WARNING: distance transform at this zoom needs ~{dt_gb:.1f} GB RAM; "
-              f"consider setting a smaller 'pyramid' zoom.")
+        print(f"WARNING: distance transform at this size needs ~{dt_gb:.1f} GB RAM; "
+              f"consider a smaller 'target_longest_side'.")
 
     work_um = native_um / z
 
@@ -322,6 +344,10 @@ def main(pp):
     prob_up = cv2.resize(prob_crop, (W_w, H_w), interpolation=cv2.INTER_LINEAR)
     fg = prob_up > float(pp["threshold"])              # boolean foreground
 
+    fg, n_removed = keep_largest_blobs(fg, pp.get("keep_connected"))
+    if n_removed:
+        print(f"keep_connected={pp['keep_connected']}: removed {n_removed} smaller blob(s)")
+
     print(f"work dims: {H_w} x {W_w}   working microns/pixel: {work_um:.4f}")
     if not fg.any():
         print("WARNING: no foreground predicted above threshold — overlays will show no mask.")
@@ -332,31 +358,38 @@ def main(pp):
     save_max = int(pp["save_max"])
 
     # 4. mask overlay (alpha 0.5)
-    mask_overlay = blend(disp, (1.0, 0.0, 0.0), fg, alpha)
+    mask_overlay = blend(disp, (1.0, 1.0, 1.0), fg, alpha)
     save_overlay(mask_overlay, outdir / "mask_overlay.png", save_max)
 
-    # 5. distance bands outward from foreground, colored with a cycling palette
-    band_microns = float(pp["band_microns"])
-    px_per_band = max(1, int(round(band_microns / work_um)))
-    inv = (~fg).astype(np.uint8)
-    dist = cv2.distanceTransform(inv, cv2.DIST_L2, 5)   # px to nearest foreground
-    band = np.floor(dist / px_per_band).astype(np.int32)
-    band[fg] = -1                                       # mark foreground
-    n_bands = int(band.max()) + 1 if (~fg).any() else 0
-    print(f"bands: {band_microns:.0f} um each = {px_per_band} px/band  ->  {n_bands} bands to edge")
+    # 5. sequential distance bands outward from the foreground. Each entry in `bands`
+    #    is a band thickness in microns; cumulative boundaries define where each band
+    #    starts/ends. Banding stops at the sum of the thicknesses (tissue beyond is
+    #    left uncolored).
+    bands_um = [float(b) for b in pp["bands"]]
+    boundaries_um = np.cumsum([0.0] + bands_um)          # len(bands)+1 edges, microns
+    dist_px = cv2.distanceTransform((~fg).astype(np.uint8), cv2.DIST_L2, 5)
+    dist_um = dist_px * work_um
+    # color index per pixel: 0 = foreground (the 0um band), 1..len = the outward distance
+    # bands defined by `bands`, -1 = tissue beyond the last boundary (uncolored).
+    ci = np.digitize(dist_um, boundaries_um).astype(np.int32)   # 1..len(bands)+1 for non-fg
+    ci[ci > len(bands_um)] = -1                                 # beyond last boundary
+    ci[fg] = 0                                                  # foreground is band 0
+    colored = ci >= 0
+    counts = [int((ci == i).sum()) for i in range(len(bands_um) + 1)]
+    print(f"bands: foreground=band0, then widths(um)={bands_um}  "
+          f"boundaries(um)={[round(float(b),1) for b in boundaries_um]}  px-counts(band0..N)={counts}")
 
     k = max(1, int(pp["palette_size"]))
     palette = cycling_palette(k)
     band_rgb = np.zeros_like(disp)
-    bg = band >= 0
-    band_rgb[bg] = palette[band[bg] % k]
+    band_rgb[colored] = palette[ci[colored] % k]
+    band_rgb[ci == 0] = (1.0, 1.0, 1.0)            # foreground (band 0) shaded white
     band_overlay = disp.copy()
-    band_overlay[bg] = (1.0 - alpha) * disp[bg] + alpha * band_rgb[bg]
-    band_overlay = blend(band_overlay, (1.0, 1.0, 1.0), fg, alpha)  # foreground distinct
+    band_overlay[colored] = (1.0 - alpha) * disp[colored] + alpha * band_rgb[colored]
 
     text = [
-        f"{work_um:.3f} um/px   {band_microns:.0f}um = {px_per_band}px/band   {n_bands} bands",
-        f"native {H}x{W}  zoom {z}",
+        f"{work_um:.3f} um/px   band0=fg  bands(um)={[int(b) for b in bands_um]}   total {boundaries_um[-1]:.0f}um",
+        f"native {H}x{W}  zoom {z:.4f}",
     ]
     save_overlay(band_overlay, outdir / "band_overlay.png", save_max, text_lines=text)
 

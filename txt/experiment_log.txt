@@ -755,4 +755,24 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     --- At this point i started doing UI work ---
 
 
-    [EXPERIMENT 9I] Try forwarding fewer tiles
+    [EXPERIMENT 9I] - forward fewer tiles (tighten ROI exclusion to overlap-only)
+    couplet with [EXPERIMENT 8M]: identical clean baseline (frozen ImageNet local encoder, bottleneck ROI,
+    bce_dice a=0.3, tiling_size=8192) except roi_exclusion_radius is dropped from 0.05 to 0.0, so the only
+    tiles forwarded are those whose bounding box actually overlaps the ROI - the ~5%-of-min-dim slack ring of
+    near-ROI background tiles is removed.
+    motivation: 8O/9x showed the model's residual errors are sloppy-ROI false positives, and the far/edge
+    background tiles carry almost no decision signal while inflating compute and the val metric. forwarding
+    only ROI-overlapping tiles concentrates both training gradient and the val IoU on the region the user
+    actually marked as the decision zone, and cuts epoch cost. complements the 7I/7J exclusion finding (more
+    consistency) by pushing the radius to its tightest setting.
+    impl: config-only (roi_exclusion already implemented; _filter_by_roi_exclusion uses tile-bbox min distance
+    to the ROI union). measured tile counts on data/[collapsed]t8192_ctx512_inner512: radius 0.05 -> 6268/19220
+    kept, radius 0.0 -> 3944/19220 kept (~37% fewer tiles forwarded).
+    run: python3 train.py -c EXPERIMENT9/EXPERIMENT_9I.json
+    Expected: faster epochs and equal-or-better, more stable validation than 8M; if it drops, true foreground
+    sometimes sits just outside the drawn ROI and the overlap-only ring is too aggressive (sweep radius back up
+    toward 0.05 in a follow-up)
+    CAVEAT: roi_exclusion filters the whole dataset before the train/val split, so 9I's val IoU is computed on a
+    different (smaller, harder) tile population than 8M - not an apples-to-apples val number, same situation as
+    7I/7J; judge by train/val correlation and qualitative results, not the raw val IoU delta vs 8M
+    Results:
