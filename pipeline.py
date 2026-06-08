@@ -221,8 +221,9 @@ def keep_largest_blobs(fg, n):
     rest. n in (None, 0, negative) -> keep everything. Returns (mask, n_removed)."""
     if not n or n <= 0:
         return fg, 0
-    num, labels, stats, _ = cv2.connectedComponentsWithStats(
-        fg.astype(np.uint8), connectivity=8)
+    # cv2 needs a C-contiguous uint8 image; the bool mask from resize/threshold may not be.
+    mask = np.ascontiguousarray(fg, dtype=np.uint8)
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     n_blobs = num - 1                                   # label 0 is background
     if n_blobs <= n:
         return fg, 0

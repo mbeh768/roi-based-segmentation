@@ -1,15 +1,15 @@
 {
     "model": "saved/models/EXPERIMENT 9I/model_best.pth",
     "config": null,
-    "image": "/media/max/2TBHDD/Max B_files_from Behfar_Shared folder(formatted)/Segmentation_Project/Provided Dataset/Human 3/8b) AJKV056_10_1-of-2_forward-RGB.czi",
+    "image": "/media/max/2TBHDD/hillestad_update_processed_3-14/For_Max_2-17-26/fluorescent/FL_22P003-6_2of2.czi",
     "target_longest_side": 20000,
     "threshold": 0.5,
     "scene": 0,
     "microns_per_pixel": null,
-    "keep_connected": 0,
-    "bands": [100, 100, 100, 100, 100],
+    "keep_connected": 1,
+    "bands": [100, 100, 500, 2000],
     "palette_size": 8,
     "outdir": null,
     "save_max": 8192,
-    "alpha": 0.5
+    "alpha": 0.25
 }

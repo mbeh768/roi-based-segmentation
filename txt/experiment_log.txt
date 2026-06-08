@@ -775,4 +775,13 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     CAVEAT: roi_exclusion filters the whole dataset before the train/val split, so 9I's val IoU is computed on a
     different (smaller, harder) tile population than 8M - not an apples-to-apples val number, same situation as
     7I/7J; judge by train/val correlation and qualitative results, not the raw val IoU delta vs 8M
-    Results:
+    Results: slightly better, nothing excluded, will include this as the new baseline
+
+
+    [EXPERIMENT 9J] - Identical to 9I but with one additional set of rois now making 3
+    Expected: better results, not visuble until true inference with a fresh drawn roi
+    Results: Better results qualitativley, it is clear adding many rois would be beneficial, too much roi variation will cause over correction by the model as it tries to fit every candidate segmentation to ground truth
+    the ideal approach to roi is to make it look like gt as much as possible, and not try to change segmentation outcome from ground truth, which must always be ideal (conjecture)
+
+
+    [EXPERIMENT 9K] - Identical to [EXPERIMENT 9I] but using 5 different random seeds to gauge performance in validation across validation sets, seeing if some images are more important than others to train on

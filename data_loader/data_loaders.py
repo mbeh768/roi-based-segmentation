@@ -70,7 +70,8 @@ class LocalGlobalDataLoader(BaseDataLoader):
                  roi_dropout=0.0, roi_distort=0.0, roi_distort_strength=0.3,
                  roi_distort_end=None, roi_distort_ramp_epochs=0,
                  roi_dropout_end=None, roi_dropout_ramp_epochs=0,
-                 roi_exclusion=False, roi_exclusion_radius=0.05):
+                 roi_exclusion=False, roi_exclusion_radius=0.05,
+                 split_seed=0):
         self.dataset = LocalGlobalDataset(
             data_dir, hflip=hflip, vflip=vflip, rot90=rot90,
             require_roi=require_roi, roi_jitter=roi_jitter,
@@ -83,6 +84,7 @@ class LocalGlobalDataLoader(BaseDataLoader):
         self._batch_size = batch_size
         self.fg_ratio = fg_ratio
         self.fg_min = fg_min
+        self.split_seed = split_seed
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
     def _split_sampler(self, split):
@@ -100,8 +102,9 @@ class LocalGlobalDataLoader(BaseDataLoader):
             val_sampler = None
         else:
             stems = list(stem_to_indices.keys())
-            np.random.seed(0)
-            np.random.shuffle(stems)
+            # split_seed controls which slides land in validation. Vary it across
+            # runs to check the reported metric isn't an artifact of one lucky split.
+            np.random.RandomState(self.split_seed).shuffle(stems)
             n_val = split if isinstance(split, int) else max(1, int(len(stems) * split))
             val_stems   = stems[:n_val]
             train_stems = stems[n_val:]

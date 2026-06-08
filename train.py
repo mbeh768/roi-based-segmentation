@@ -13,13 +13,19 @@ from utils import prepare_device
 
 # fix random seeds for reproducibility
 SEED = 123
-torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-np.random.seed(SEED)
 
 def main(config):
     logger = config.get_logger('train')
+
+    # Seed the global RNGs from the data loader's split_seed so that --seed varies
+    # the train/val split AND weight init / sampling together — each run is then a
+    # fully independent draw, which is what makes the across-seed spread meaningful.
+    seed = config['data_loader']['args'].get('split_seed', SEED)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    logger.info('seed=%d (split + init)', seed)
 
     # setup data_loader instances
     data_loader = config.init_obj('data_loader', module_data)
@@ -131,7 +137,8 @@ if __name__ == '__main__':
     CustomArgs = collections.namedtuple('CustomArgs', 'flags type target')
     options = [
         CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
-        CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;batch_size')
+        CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;batch_size'),
+        CustomArgs(['--seed'], type=int, target='data_loader;args;split_seed')
     ]
     config = ConfigParser.from_args(args, options)
     main(config)
