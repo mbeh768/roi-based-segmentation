@@ -138,7 +138,9 @@ if __name__ == '__main__':
     options = [
         CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
         CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;batch_size'),
-        CustomArgs(['--seed'], type=int, target='data_loader;args;split_seed')
+        CustomArgs(['--seed'], type=int, target='data_loader;args;split_seed'),
+        CustomArgs(['--fold'], type=int, target='data_loader;args;fold'),
+        CustomArgs(['--n_folds'], type=int, target='data_loader;args;n_folds')
     ]
     config = ConfigParser.from_args(args, options)
     main(config)

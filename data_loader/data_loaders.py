@@ -71,7 +71,7 @@ class LocalGlobalDataLoader(BaseDataLoader):
                  roi_distort_end=None, roi_distort_ramp_epochs=0,
                  roi_dropout_end=None, roi_dropout_ramp_epochs=0,
                  roi_exclusion=False, roi_exclusion_radius=0.05,
-                 split_seed=0):
+                 split_seed=0, n_folds=0, fold=0):
         self.dataset = LocalGlobalDataset(
             data_dir, hflip=hflip, vflip=vflip, rot90=rot90,
             require_roi=require_roi, roi_jitter=roi_jitter,
@@ -85,6 +85,8 @@ class LocalGlobalDataLoader(BaseDataLoader):
         self.fg_ratio = fg_ratio
         self.fg_min = fg_min
         self.split_seed = split_seed
+        self.n_folds = n_folds
+        self.fold = fold
         super().__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
     def _split_sampler(self, split):
@@ -105,9 +107,20 @@ class LocalGlobalDataLoader(BaseDataLoader):
             # split_seed controls which slides land in validation. Vary it across
             # runs to check the reported metric isn't an artifact of one lucky split.
             np.random.RandomState(self.split_seed).shuffle(stems)
-            n_val = split if isinstance(split, int) else max(1, int(len(stems) * split))
-            val_stems   = stems[:n_val]
-            train_stems = stems[n_val:]
+            if self.n_folds and self.n_folds >= 2:
+                # k-fold: partition the (seed-shuffled) slides into n_folds chunks and
+                # hold out chunk `fold` for validation. Keep split_seed FIXED across the
+                # k runs and vary only `fold` (0..n_folds-1) so each slide is validated
+                # exactly once and weight init stays constant — isolating the split
+                # effect. validation_split is ignored in fold mode (val size = 1/k).
+                chunks = [list(c) for c in np.array_split(np.array(stems, dtype=object), self.n_folds)]
+                f = self.fold % self.n_folds
+                val_stems   = chunks[f]
+                train_stems = [s for i, c in enumerate(chunks) if i != f for s in c]
+            else:
+                n_val = split if isinstance(split, int) else max(1, int(len(stems) * split))
+                val_stems   = stems[:n_val]
+                train_stems = stems[n_val:]
             train_idx = [i for s in train_stems for i in stem_to_indices[s]]
             val_idx   = [i for s in val_stems   for i in stem_to_indices[s]]
             val_sampler = SubsetRandomSampler(val_idx)

@@ -785,3 +785,42 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
 
 
     [EXPERIMENT 9K] - Identical to [EXPERIMENT 9I] but using 5 different random seeds to gauge performance in validation across validation sets, seeing if some images are more important than others to train on
+    made early stop 25 epochs instead of 100 to speed things up
+    Expected: Slight variation in results based on out of distribution validation samples
+    Results: massive performance improvement for some other seeds. Previous tests seemed to be the worst-case scenario, this could have been bad, where a "good" validation set would have been selected and results would be unrealistically good.
+    Future projects should take note to frequently implement 1 in k or randomized seed experiments.
+
+
+    [EXPERIMENT 9L] - 5-fold cross-validation (every slide validated exactly once)
+    follow-up to [EXPERIMENT 9K]: 9K's seed sweep showed val IoU swings wildly with which ~24 slides land in
+    val, so a single split is not a reportable number. 9L turns that into a defensible one. Identical clean
+    baseline to [EXPERIMENT 9I] (frozen ImageNet local encoder, bottleneck ROI, bce_dice a=0.3, tiling_size=8192,
+    roi_exclusion_radius=0.0) plus k-fold knobs: split_seed=42 (FIXED across all folds), n_folds=5, and fold
+    rotated 0..4 via --fold. Because split_seed is fixed, the slide partition AND weight init are constant across
+    folds and only the held-out chunk moves - so the spread measures the split effect, not init noise (the 9K
+    confound where --seed moved both). np.array_split gives balanced folds (5/5/5/4/4 on the current slide count)
+    with no slide in both train and val (stem-grouped split, verified clean cover). early_stop=25 like 9K for speed
+    (5 runs).
+    impl: data_loader split_seed/n_folds/fold added to LocalGlobalDataLoader; train.py --seed/--fold/--n_folds
+    overrides; n_folds>=2 ignores validation_split and uses 1/k folds.
+    run: for f in 0 1 2 3 4; do python3 train.py -c EXPERIMENT9/EXPERIMENT_9L.json --fold $f; done
+    Expected: mean +/- std of val IoU across the 5 folds; mean should sit between 9K's best and worst seeds and is
+    the number to report. If std is large the method is genuinely split-sensitive (small-n) and the paper should
+    lead with the CV mean, never a single split.
+    Results:
+
+
+    [EXPERIMENT 9M] - post-hoc per-fold + per-slide variance analysis (utils/kfold_report.py)
+    analysis of [EXPERIMENT 9L]'s outputs, not a training run - parses what training already wrote (no tracking
+    added inside the epoch loop). per-fold mode reads each fold's info.log, picks the best epoch by the monitor
+    (min val_loss = the model_best.pth epoch) and reports val_iou/val_loss across folds as mean +/- std. per-slide
+    mode loads each fold's model_best.pth and scores its held-out slides with augmentation OFF, averaging per-tile
+    IoU per slide; since 9L validates every slide exactly once, concatenating folds yields a full per-slide
+    difficulty table to answer "are the same slides always easy/hard?". per-slide reuses LocalGlobalDataLoader to
+    pick the val indices so the split is byte-identical to training.
+    run: python3 utils/kfold_report.py --name "EXPERIMENT 9L"            (per-fold mean +/- std)
+         python3 utils/kfold_report.py --name "EXPERIMENT 9L" --per-slide  (also per-slide table)
+    Expected: a clean CV summary line for the paper, and a ranked per-slide IoU list; expect a handful of
+    consistently-hard slides to dominate the variance rather than uniform noise (would confirm the 9K spread is a
+    few outlier slides, which is characterizable).
+    Results:
