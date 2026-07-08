@@ -48,7 +48,7 @@
         }
     },
     "preprocess": {
-        "raw_image_directory": "/media/max/2TBHDD/Max B_files_from Behfar_Shared folder(formatted)/Segmentation_Project/RGB FULL - dataset",
+        "raw_image_directory": "/mnt/8TBhdd/datasets/mayo_datasets/Max B_files_from Behfar_Shared folder(formatted)/Segmentation_Project/RGB FULL - dataset",
         "global_downsample": 256,
         "czi_max_px": 5000000000,
         "tiling_size": 2048,
