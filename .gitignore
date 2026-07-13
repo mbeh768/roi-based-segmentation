@@ -116,6 +116,10 @@ input/
 saved/
 datasets/
 
+# large intermediate raster files (prob maps, masks) -- too big for git
+*.tif
+*.tiff
+
 # editor, os cache directory
 .vscode/
 .idea/

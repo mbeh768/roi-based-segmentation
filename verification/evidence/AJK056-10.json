@@ -1,0 +1,95 @@
+{
+  "pair": "AJK056-10",
+  "run_dir": "EXPERIMENT 10A_old [wholistic performance evaluation]_2",
+  "stems": [
+    "AJKV056-10-1-of-2",
+    "AJK056-10-2of2"
+  ],
+  "train_set_stems": [
+    "17P391_7A",
+    "21PControl-1",
+    "21PControl-11-1of2",
+    "21PControl-11-2of2",
+    "21PControl-2",
+    "21PControl-9-2of2",
+    "AJKV056-7",
+    "AJKY121-7-2",
+    "AJKY121-8-1",
+    "AJKY121-8-2",
+    "AJKY121-9-2",
+    "FL_22P003-6_1of2",
+    "FL_22P003-6_2of2"
+  ],
+  "val_set_stems": [
+    "17P645-1",
+    "21PControl-9-1of2",
+    "21PControl_4",
+    "AJKV056-8",
+    "AJKY121-9-1"
+  ],
+  "held_out_stems_absent_from_train": [
+    "AJKV056-10-1-of-2",
+    "AJK056-10-2of2"
+  ],
+  "held_out_stems_absent_from_val": [
+    "AJKV056-10-1-of-2",
+    "AJK056-10-2of2"
+  ],
+  "exclusion_verified": true,
+  "checkpoint_remote_stat": [
+    "1783714608 /home/USER/scripts/saved/models/EXPERIMENT 10A_old [wholistic performance evaluation]_2/model_best.pth"
+  ],
+  "stems_detail": {
+    "AJKV056-10-1-of-2": {
+      "gt_mask_path": "/mnt/8TBhdd/datasets/mayo_datasets/Max B_files_from Behfar_Shared folder(formatted)/Segmentation_Project/RGB FULL - dataset/AJK056-10-1of2/AJKV056-10-1-of-2_mask.tiff",
+      "gt_mask_md5": "aa9c5af3e3d1c6476250c6b178e58a0c",
+      "raw_image_path": "/mnt/8TBhdd/datasets/mayo_datasets/Max B_files_from Behfar_Shared folder(formatted)/Segmentation_Project/RGB FULL - dataset/AJK056-10-1of2/AJKV056-10-1-of-2_image.tiff",
+      "raw_image_md5": "a067c527084a4d0a211d4b3d52740acd",
+      "gt_radial_profile_md5": "ab32c4001c6141004985381f6fb7420e",
+      "gt_band_means_csv": "band,R_mean,G_mean,B_mean,G_over_R,n_px\nsubendocardium,21.3815,7.1743,31.9613,0.3355,29379259\n+100um,25.0865,8.2543,35.0507,0.3290,33490680\n+200um,27.5847,8.7011,37.1579,0.3154,36912662\n",
+      "pred_prob_map_path": "/mnt/2TBnvme/machine_learning_projects/Mayo/att_vent_seg/held_out_results/AJK056-10_pair/AJKV056-10-1-of-2_prob_map.tif",
+      "pred_prob_map_md5": "0e600d1de91a506c28cca3fc52e191ee",
+      "pred_prob_map_mtime": "2026-07-10T20:39:11.091549",
+      "native_pred_mask_path": "/tmp/native_pred_masks/AJKV056-10-1-of-2_native_pred_mask.tif",
+      "native_pred_mask_md5": "68c193879fabbe54170a05a7b7f43b57",
+      "native_pred_mask_mtime": "2026-07-12T18:58:35.635613",
+      "pred_subendocardium_png_mtime": "2026-07-12T19:26:50.090311",
+      "pred_band_means_csv": "band,R_mean,G_mean,B_mean,G_over_R,n_px\nsubendocardium,20.7485,6.9243,30.8952,0.3337,28982810\n+100um,24.6392,8.0623,34.4163,0.3272,33222575\n+200um,27.5130,8.6005,36.9530,0.3126,37149626\n",
+      "chronology_ok": true,
+      "chronology_values_unix": {
+        "checkpoint_saved": 1783714608.0,
+        "prob_map_generated": 1783730351.0915492,
+        "native_mask_generated": 1783897115.635613,
+        "quantification_generated": 1783898810.0903113
+      }
+    },
+    "AJK056-10-2of2": {
+      "gt_mask_path": "/mnt/8TBhdd/datasets/mayo_datasets/Max B_files_from Behfar_Shared folder(formatted)/Segmentation_Project/RGB FULL - dataset/AJK056-10-2of2/AJK056-10-2of2_mask.tiff",
+      "gt_mask_md5": "3c3d262b2df2dd2a42b49e7067a6ccda",
+      "raw_image_path": "/mnt/8TBhdd/datasets/mayo_datasets/Max B_files_from Behfar_Shared folder(formatted)/Segmentation_Project/RGB FULL - dataset/AJK056-10-2of2/AJK056-10-2of2_image.tiff",
+      "raw_image_md5": "b6025ba4b3b02050235b6decc04324ba",
+      "gt_radial_profile_md5": "fba8f246b87814f0b4be519143286ed7",
+      "gt_band_means_csv": "band,R_mean,G_mean,B_mean,G_over_R,n_px\nsubendocardium,6022.8233,2006.4389,9425.8777,0.3331,29847390\n+100um,7445.6967,2361.3953,10517.7822,0.3171,36889003\n+200um,8298.3545,2476.1041,11258.1393,0.2984,43408119\n",
+      "pred_prob_map_path": "/mnt/2TBnvme/machine_learning_projects/Mayo/att_vent_seg/held_out_results/AJK056-10_pair/AJK056-10-2of2_prob_map.tif",
+      "pred_prob_map_md5": "90175206dedb29f93512a3012d3580ca",
+      "pred_prob_map_mtime": "2026-07-10T20:39:01.789603",
+      "native_pred_mask_path": "/tmp/native_pred_masks/AJK056-10-2of2_native_pred_mask.tif",
+      "native_pred_mask_md5": "989969966db6ba6d1e97380d244d7cc1",
+      "native_pred_mask_mtime": "2026-07-12T18:58:26.470674",
+      "pred_subendocardium_png_mtime": "2026-07-12T19:26:57.042964",
+      "pred_band_means_csv": "band,R_mean,G_mean,B_mean,G_over_R,n_px\nsubendocardium,5973.1195,1992.9995,9277.9630,0.3337,29600810\n+100um,7248.7209,2314.2986,10321.4980,0.3193,36276461\n+200um,8109.4860,2442.8624,11068.8433,0.3012,42861645\n",
+      "chronology_ok": true,
+      "chronology_values_unix": {
+        "checkpoint_saved": 1783714608.0,
+        "prob_map_generated": 1783730341.7896035,
+        "native_mask_generated": 1783897106.470674,
+        "quantification_generated": 1783898817.0429645
+      }
+    }
+  },
+  "tool_script_md5": {
+    "quantify_bands.py": "2ab10d2be58167aaa4c30b57cc3885b9",
+    "quantify_intensity.py": "72c11cc7ff8cc4f005027f7027251192",
+    "upsample_pred_mask.py": "e6295609d73ccd84af54a3f04e0707d7"
+  }
+}
