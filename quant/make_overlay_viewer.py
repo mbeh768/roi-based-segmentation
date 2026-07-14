@@ -1,14 +1,21 @@
 """
 Generate a self-contained HTML viewer for one slide: the RGB image with its
-ground-truth mask as a white overlay whose opacity is adjustable via a slider
+ground-truth mask as a white overlay whose opacity and X/Y offset (in image
+pixels, for checking mask-to-image registration) are adjustable via sliders
 (plus wheel-zoom / drag-pan since these are gigapixel images downsampled for
-browser display).
+browser display). Optionally also shows a second, independently toggleable
+overlay: the mask region grown or shrunk (dilated/eroded) by an
+offset-controlled number of pixels (up to +/-60px by default), for
+visualizing margin/buffer zones around the mask. Growing colors the newly
+added mass teal; shrinking fills the surviving region orange. Tracks
+whichever mask (original or pockets-removed) is currently displayed.
 
 Usage:
     python quant/make_overlay_viewer.py --rgb <image.tiff> --mask <mask.tiff> \
         --stem AJKV056-10-1-of-2 --outdir quant/overlays/AJKV056-10-1of2 --max-dim 3000
 """
 import argparse
+import base64
 from pathlib import Path
 
 import cv2
@@ -16,6 +23,10 @@ import numpy as np
 import tifffile
 
 OVERLAY_COLOR = (255, 255, 255)  # white
+BAND_COLOR = (255, 140, 0)  # orange, for the eroded (shrunk) offset band
+BAND_GROW_COLOR = (0, 191, 165)  # teal, for pixels newly added by a dilate (grow) offset
+DIST_CLIP = 60  # px; keeps signed distance in [-60, 60], packed into 2 uint8 channels (+60)
+POCKET_FRAC = 0.10  # remove connected foreground regions <= this fraction of the largest region's area
 
 
 def load_rgb_uint8(path):
@@ -46,6 +57,46 @@ def load_mask_bool(path, mode='threshold'):
     return arr >= 128
 
 
+def signed_distance_encoded(mask, clip=DIST_CLIP):
+    """Per-pixel distance (px) to the mask boundary, signed negative inside the
+    mask and positive outside, clipped to +/-clip. A single uint8 channel only
+    holds +/-127, which is too coarse for these gigapixel slides (a visible
+    grow/shrink needs a range up to ~1000px), so the value is packed as a
+    16-bit unsigned int (clip+value, range [0, 2*clip]) split across the R
+    (high byte) and G (low byte) channels of a BGR image -- an 8-bit-per-
+    channel PNG round-trips through <canvas> without precision loss, unlike a
+    true 16-bit PNG (canvas always reads back 8-bit RGBA). Growing the mask by
+    an offset o (dilate) then reduces to "keep pixels where value <= o";
+    shrinking (erode) is the same test with a negative o."""
+    fg = mask.astype(np.uint8)
+    dist_out = cv2.distanceTransform(1 - fg, cv2.DIST_L2, 3)
+    dist_in = cv2.distanceTransform(fg, cv2.DIST_L2, 3)
+    signed = np.where(mask, -dist_in, dist_out)
+    clipped = np.clip(np.round(signed), -clip, clip).astype(np.int32)
+    encoded = (clipped + clip).astype(np.uint16)
+    high = (encoded >> 8).astype(np.uint8)
+    low = (encoded & 0xFF).astype(np.uint8)
+    h, w = mask.shape
+    packed = np.zeros((h, w, 3), dtype=np.uint8)
+    packed[..., 2] = high  # R
+    packed[..., 1] = low   # G
+    return packed
+
+
+def remove_pockets(mask, frac=POCKET_FRAC):
+    """Drop connected foreground components whose area is <= frac * the area of
+    the largest component (removes small isolated pockets, keeps the main
+    region and any other comparably large regions)."""
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8), connectivity=8)
+    if num_labels <= 1:
+        return mask.copy()
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    largest = areas.max()
+    keep = {i + 1 for i, a in enumerate(areas) if a > frac * largest}
+    return np.isin(labels, list(keep))
+
+
 def downsample(arr, max_dim, interp):
     h, w = arr.shape[:2]
     scale = max_dim / max(h, w)
@@ -55,19 +106,29 @@ def downsample(arr, max_dim, interp):
     return cv2.resize(arr, (new_w, new_h), interpolation=interp)
 
 
-def main(args):
-    outdir = Path(args.outdir)
+def render_viewer(outdir, base_bgr, mask_small, stem, mask_label, band_max_offset=60):
+    """Write base.png, mask_overlay.png, mask_overlay_clean.png and index.html
+    into outdir, given an already-downsampled BGR base image and boolean mask
+    at matching (h, w). This is the shared core used both by the CLI (after
+    downsampling a fresh RGB/mask pair) and by a regeneration script that
+    reuses a directory's existing base.png/mask_overlay.png.
+
+    The grow/shrink distance map is NOT written as a separate PNG: these
+    viewers are meant to be opened directly (file://, no local server), and
+    Chrome taints a canvas that has drawn an image loaded via a relative
+    file:// src, which silently breaks getImageData() for the band feature.
+    Embedding the same PNG bytes as a base64 data: URI instead avoids the
+    taint (data: URIs don't trigger the cross-origin canvas restriction)
+    while keeping the same PNG compression -- confirmed empirically since
+    this is a real Chromium quirk, not documented behavior to take on faith."""
+    if band_max_offset > DIST_CLIP:
+        raise ValueError(f"band_max_offset ({band_max_offset}) exceeds DIST_CLIP ({DIST_CLIP})")
+    if base_bgr.shape[:2] != mask_small.shape:
+        raise ValueError(f"base shape {base_bgr.shape[:2]} != mask shape {mask_small.shape}")
+
+    outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    rgb = load_rgb_uint8(args.rgb)
-    mask = load_mask_bool(args.mask, args.mask_mode)
-    if rgb.shape[:2] != mask.shape:
-        raise ValueError(f"rgb shape {rgb.shape[:2]} != mask shape {mask.shape}")
-
-    rgb_small = downsample(rgb, args.max_dim, cv2.INTER_AREA)
-    mask_small = downsample(mask.astype(np.uint8) * 255, args.max_dim, cv2.INTER_NEAREST) >= 128
-
-    base_bgr = cv2.cvtColor(rgb_small, cv2.COLOR_RGB2BGR)
     cv2.imwrite(str(outdir / 'base.png'), base_bgr)
 
     h, w = mask_small.shape
@@ -78,11 +139,33 @@ def main(args):
     overlay[mask_small, 3] = 255
     cv2.imwrite(str(outdir / 'mask_overlay.png'), overlay)
 
+    mask_clean = remove_pockets(mask_small, frac=POCKET_FRAC)
+    overlay_clean = np.zeros((h, w, 4), dtype=np.uint8)
+    overlay_clean[mask_clean, 0] = OVERLAY_COLOR[2]
+    overlay_clean[mask_clean, 1] = OVERLAY_COLOR[1]
+    overlay_clean[mask_clean, 2] = OVERLAY_COLOR[0]
+    overlay_clean[mask_clean, 3] = 255
+    cv2.imwrite(str(outdir / 'mask_overlay_clean.png'), overlay_clean)
+
+    def encode_dist_b64(m):
+        dist_map = signed_distance_encoded(m, clip=DIST_CLIP)
+        ok, dist_png_bytes = cv2.imencode('.png', dist_map)
+        if not ok:
+            raise RuntimeError("failed to encode distance map PNG")
+        return base64.b64encode(dist_png_bytes.tobytes()).decode('ascii')
+
+    # Two separate distance maps: the grow/shrink band must reflect whichever
+    # mask (original or pockets-removed) is currently displayed -- a pocket
+    # dropped from view but still baked into the distance transform would
+    # keep distorting the band around where it used to be.
+    dist_b64_orig = encode_dist_b64(mask_small)
+    dist_b64_clean = encode_dist_b64(mask_clean)
+
     html = f"""<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>{args.stem}: RGB + {args.mask_label} overlay</title>
+<title>{stem}: RGB + {mask_label} overlay</title>
 <style>
   html, body {{ margin: 0; padding: 0; background: #1a1a1a; color: #eee;
                 font-family: -apple-system, Helvetica, Arial, sans-serif; height: 100%; }}
@@ -90,40 +173,54 @@ def main(args):
           background: #222; border-bottom: 1px solid #333; }}
   #bar h1 {{ font-size: 14px; font-weight: 600; margin: 0; color: #fff; flex: 0 0 auto; }}
   #bar label {{ font-size: 13px; color: #bbb; }}
-  #opacity, #offset-x, #offset-y {{ width: 160px; }}
-  #opacity-val, #offset-x-val, #offset-y-val {{ font-size: 13px; color: #fff; width: 3.5em; }}
-  #reset-offset {{ font-size: 12px; color: #ddd; background: #333; border: 1px solid #444;
+  #opacity, #offset-x, #offset-y, #band-offset {{ width: 160px; }}
+  #opacity-val, #offset-x-val, #offset-y-val, #band-offset-val {{ font-size: 13px; color: #fff; width: 3.5em; }}
+  #reset-offset, #pockets-toggle {{ font-size: 12px; color: #ddd; background: #333; border: 1px solid #444;
                     border-radius: 4px; padding: 4px 8px; cursor: pointer; }}
-  #reset-offset:hover {{ background: #3a3a3a; }}
+  #reset-offset:hover, #pockets-toggle:hover {{ background: #3a3a3a; }}
+  #pockets-toggle.active {{ background: #2d6a3e; border-color: #3a8a51; color: #fff; }}
+  #pockets-toggle.active:hover {{ background: #357a48; }}
+  #bar-row2 {{ display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+               background: #1e1e1e; border-bottom: 1px solid #333; }}
   #hint {{ font-size: 12px; color: #888; margin-left: auto; }}
-  #viewport {{ position: relative; width: 100%; height: calc(100% - 46px);
+  #viewport {{ position: relative; width: 100%; height: calc(100% - 84px);
                overflow: hidden; cursor: grab; background: #000; }}
   #viewport.dragging {{ cursor: grabbing; }}
   #stage {{ position: absolute; top: 0; left: 0; transform-origin: 0 0; }}
-  #stage img {{ display: block; position: absolute; top: 0; left: 0;
+  #stage img, #stage canvas {{ display: block; position: absolute; top: 0; left: 0;
                 width: {w}px; height: {h}px; user-select: none; pointer-events: none; }}
   #mask {{ opacity: 0.5; }}
+  #band {{ display: none; opacity: 0.55; }}
 </style>
 </head>
 <body>
 <div id="bar">
-  <h1>{args.stem}</h1>
-  <label for="opacity">{args.mask_label} opacity</label>
+  <h1>{stem}</h1>
+  <label for="opacity">{mask_label} opacity</label>
   <input id="opacity" type="range" min="0" max="100" value="50">
   <span id="opacity-val">50%</span>
-  <label for="offset-x">{args.mask_label} X offset</label>
+  <label for="offset-x">{mask_label} X offset</label>
   <input id="offset-x" type="range" min="-30" max="30" value="0">
   <span id="offset-x-val">0px</span>
-  <label for="offset-y">{args.mask_label} Y offset</label>
+  <label for="offset-y">{mask_label} Y offset</label>
   <input id="offset-y" type="range" min="-30" max="30" value="0">
   <span id="offset-y-val">0px</span>
   <button id="reset-offset">reset offset</button>
+  <button id="pockets-toggle" title="hide connected foreground regions &lt;= {int(POCKET_FRAC * 100)}% the size of the largest region">remove pockets (&lt;={int(POCKET_FRAC * 100)}%)</button>
   <span id="hint">scroll to zoom, drag to pan, double-click to reset view</span>
+</div>
+<div id="bar-row2">
+  <label><input type="checkbox" id="band-toggle"> show {mask_label} grow/shrink band</label>
+  <label for="band-offset">offset</label>
+  <input id="band-offset" type="range" min="-{band_max_offset}" max="{band_max_offset}" value="0" disabled>
+  <span id="band-offset-val">0px</span>
+  <span id="band-hint" style="font-size:12px; color:#888;">positive = grow (dilate): teal = added mass; negative = shrink (erode): orange = surviving region</span>
 </div>
 <div id="viewport">
   <div id="stage">
     <img id="base" src="base.png">
     <img id="mask" src="mask_overlay.png">
+    <canvas id="band" width="{w}" height="{h}"></canvas>
   </div>
 </div>
 <script>
@@ -149,6 +246,108 @@ def main(args):
   offsetYSlider.addEventListener('input', applyMaskOffset);
   document.getElementById('reset-offset').addEventListener('click', () => {{
     offsetXSlider.value = 0; offsetYSlider.value = 0; applyMaskOffset();
+  }});
+
+  const pocketsToggle = document.getElementById('pockets-toggle');
+  let pocketsRemoved = false;
+  pocketsToggle.addEventListener('click', async () => {{
+    pocketsRemoved = !pocketsRemoved;
+    maskImg.src = pocketsRemoved ? 'mask_overlay_clean.png' : 'mask_overlay.png';
+    pocketsToggle.classList.toggle('active', pocketsRemoved);
+    if (bandToggle.checked) {{
+      await loadDistMap(pocketsRemoved);
+      scheduleRenderBand();
+    }}
+  }});
+
+  const bandToggle = document.getElementById('band-toggle');
+  const bandOffsetSlider = document.getElementById('band-offset');
+  const bandOffsetVal = document.getElementById('band-offset-val');
+  const bandCanvas = document.getElementById('band');
+  const bandCtx = bandCanvas.getContext('2d');
+  const BAND_COLOR = [{BAND_COLOR[0]}, {BAND_COLOR[1]}, {BAND_COLOR[2]}];       // erode: shrunk region
+  const BAND_GROW_COLOR = [{BAND_GROW_COLOR[0]}, {BAND_GROW_COLOR[1]}, {BAND_GROW_COLOR[2]}]; // dilate: newly-added mass
+  const DIST_CLIP = {DIST_CLIP};
+  // Uint8ClampedArray RGBA caches; R=high byte, G=low byte of (signed_dist_px + DIST_CLIP).
+  // Separate caches for the original vs. pockets-removed mask -- the band must
+  // reflect whichever one is currently displayed.
+  let distDataOrig = null;
+  let distDataClean = null;
+  let bandPending = false;
+
+  // Embedded (not loaded from a separate file) so opening this HTML directly via
+  // file:// still works: Chrome taints the canvas for an image loaded via a
+  // relative file:// src, which silently breaks getImageData() below. A data:
+  // URI of the same PNG bytes does not taint the canvas.
+  const DIST_PNG_DATA_URI_ORIG = 'data:image/png;base64,{dist_b64_orig}';
+  const DIST_PNG_DATA_URI_CLEAN = 'data:image/png;base64,{dist_b64_clean}';
+
+  function loadDistMap(useClean) {{
+    if (useClean && distDataClean) return Promise.resolve();
+    if (!useClean && distDataOrig) return Promise.resolve();
+    return new Promise((resolve) => {{
+      const img = new Image();
+      img.onload = () => {{
+        const off = document.createElement('canvas');
+        off.width = {w}; off.height = {h};
+        const offCtx = off.getContext('2d');
+        offCtx.drawImage(img, 0, 0);
+        const data = offCtx.getImageData(0, 0, {w}, {h}).data;
+        if (useClean) distDataClean = data; else distDataOrig = data;
+        resolve();
+      }};
+      img.src = useClean ? DIST_PNG_DATA_URI_CLEAN : DIST_PNG_DATA_URI_ORIG;
+    }});
+  }}
+
+  function renderBand() {{
+    bandPending = false;
+    const distData = pocketsRemoved ? distDataClean : distDataOrig;
+    if (!distData) return;
+    const offset = parseInt(bandOffsetSlider.value, 10);
+    const out = bandCtx.createImageData({w}, {h});
+    const dst = out.data;
+    const [er, eg, eb] = BAND_COLOR;
+    const [gr, gg, gb] = BAND_GROW_COLOR;
+    for (let i = 0; i < distData.length; i += 4) {{
+      const signed = (distData[i] << 8 | distData[i + 1]) - DIST_CLIP;
+      if (offset <= 0) {{
+        // erode: fill the surviving (shrunk) region so its smaller boundary
+        // is visible against the full-size white mask underneath.
+        if (signed <= offset) {{
+          dst[i] = er; dst[i + 1] = eg; dst[i + 2] = eb; dst[i + 3] = 255;
+        }}
+      }} else {{
+        // dilate: only color pixels that are newly added (were background,
+        // now within the grow offset) -- the original mask stays uncolored
+        // so the teal ring shows exactly what growth adds.
+        if (signed > 0 && signed <= offset) {{
+          dst[i] = gr; dst[i + 1] = gg; dst[i + 2] = gb; dst[i + 3] = 255;
+        }}
+      }}
+    }}
+    bandCtx.putImageData(out, 0, 0);
+  }}
+
+  function scheduleRenderBand() {{
+    if (bandPending) return;
+    bandPending = true;
+    requestAnimationFrame(renderBand);
+  }}
+
+  bandToggle.addEventListener('change', async () => {{
+    bandOffsetSlider.disabled = !bandToggle.checked;
+    if (bandToggle.checked) {{
+      bandCanvas.style.display = 'block';
+      await loadDistMap(pocketsRemoved);
+      scheduleRenderBand();
+    }} else {{
+      bandCanvas.style.display = 'none';
+    }}
+  }});
+  bandOffsetSlider.addEventListener('input', () => {{
+    bandOffsetVal.textContent = bandOffsetSlider.value + 'px';
+    if (bandToggle.checked) scheduleRenderBand();
   }});
 
   const viewport = document.getElementById('viewport');
@@ -205,6 +404,21 @@ def main(args):
     print(f"saved -> {outdir / 'index.html'}")
     print(f"saved -> {outdir / 'base.png'}")
     print(f"saved -> {outdir / 'mask_overlay.png'}")
+    print(f"saved -> {outdir / 'mask_overlay_clean.png'}")
+
+
+def main(args):
+    rgb = load_rgb_uint8(args.rgb)
+    mask = load_mask_bool(args.mask, args.mask_mode)
+    if rgb.shape[:2] != mask.shape:
+        raise ValueError(f"rgb shape {rgb.shape[:2]} != mask shape {mask.shape}")
+
+    rgb_small = downsample(rgb, args.max_dim, cv2.INTER_AREA)
+    mask_small = downsample(mask.astype(np.uint8) * 255, args.max_dim, cv2.INTER_NEAREST) >= 128
+    base_bgr = cv2.cvtColor(rgb_small, cv2.COLOR_RGB2BGR)
+
+    render_viewer(args.outdir, base_bgr, mask_small, args.stem, args.mask_label,
+                  band_max_offset=args.band_max_offset)
 
 
 if __name__ == '__main__':
@@ -217,4 +431,6 @@ if __name__ == '__main__':
     parser.add_argument('--max-dim', type=int, default=3000)
     parser.add_argument('--mask-mode', choices=['threshold', 'nonwhite'], default='threshold')
     parser.add_argument('--mask-label', default='GT mask')
+    parser.add_argument('--band-max-offset', type=int, default=60,
+                         help='max |px| for the grow/shrink band slider (<= %d)' % DIST_CLIP)
     main(parser.parse_args())
