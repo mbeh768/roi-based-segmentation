@@ -1,1 +1,0 @@
-16bit rescaled to 8bit
