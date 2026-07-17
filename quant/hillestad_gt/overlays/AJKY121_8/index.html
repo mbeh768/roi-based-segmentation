@@ -12,11 +12,13 @@
   #bar label { font-size: 13px; color: #bbb; }
   #opacity, #offset-x, #offset-y, #band-offset { width: 160px; }
   #opacity-val, #offset-x-val, #offset-y-val, #band-offset-val { font-size: 13px; color: #fff; width: 3.5em; }
-  #reset-offset, #pockets-toggle { font-size: 12px; color: #ddd; background: #333; border: 1px solid #444;
+  #reset-offset, #pockets-toggle, #otsu-islands-toggle, #otsu-pockets-toggle {
+                    font-size: 12px; color: #ddd; background: #333; border: 1px solid #444;
                     border-radius: 4px; padding: 4px 8px; cursor: pointer; }
-  #reset-offset:hover, #pockets-toggle:hover { background: #3a3a3a; }
-  #pockets-toggle.active { background: #2d6a3e; border-color: #3a8a51; color: #fff; }
-  #pockets-toggle.active:hover { background: #357a48; }
+  #reset-offset:hover, #pockets-toggle:hover, #otsu-islands-toggle:hover, #otsu-pockets-toggle:hover { background: #3a3a3a; }
+  #pockets-toggle.active, #otsu-islands-toggle.active, #otsu-pockets-toggle.active {
+                    background: #2d6a3e; border-color: #3a8a51; color: #fff; }
+  #pockets-toggle.active:hover, #otsu-islands-toggle.active:hover, #otsu-pockets-toggle.active:hover { background: #357a48; }
   #bar-row2 { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
                background: #1e1e1e; border-bottom: 1px solid #333; }
   #hint { font-size: 12px; color: #888; margin-left: auto; }
@@ -28,6 +30,9 @@
                 width: 3000px; height: 2518px; user-select: none; pointer-events: none; }
   #mask { opacity: 0.5; }
   #band { display: none; opacity: 0.55; }
+  #otsu { opacity: 0; }
+  #bar-row3 { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+               background: #1e1e1e; border-bottom: 1px solid #333; }
 </style>
 </head>
 <body>
@@ -53,10 +58,20 @@
   <span id="band-offset-val">0px</span>
   <span id="band-hint" style="font-size:12px; color:#888;">positive = grow (dilate): teal = added mass; negative = shrink (erode): orange = surviving region</span>
 </div>
+<div id="bar-row3">
+  <label><input type="checkbox" id="otsu-toggle"> show Otsu threshold foreground</label>
+  <label for="otsu-opacity">opacity</label>
+  <input id="otsu-opacity" type="range" min="0" max="100" value="50">
+  <span id="otsu-opacity-val">50%</span>
+  <button id="otsu-islands-toggle" title="drop isolated foreground blobs &lt;= 5% the size of the largest blob">remove islands (&lt;=5%)</button>
+  <button id="otsu-pockets-toggle" title="fill enclosed background holes &lt;= 10% the size of the largest foreground blob">remove pockets (&lt;=10%)</button>
+  <span style="font-size:12px; color:#888;">magenta = pixels classified foreground (tissue) by a global Otsu threshold on the red channel -- validity check against the legacy mask boundary as an epicardium detector</span>
+</div>
 <div id="viewport">
   <div id="stage">
     <img id="base" src="base.png">
     <img id="mask" src="mask_overlay.png">
+    <img id="otsu" src="otsu_overlay.png">
     <canvas id="band" width="3000" height="2518"></canvas>
   </div>
 </div>
@@ -95,6 +110,38 @@
       await loadDistMap(pocketsRemoved);
       scheduleRenderBand();
     }
+  });
+
+  const otsuToggle = document.getElementById('otsu-toggle');
+  const otsuImg = document.getElementById('otsu');
+  const otsuOpacitySlider = document.getElementById('otsu-opacity');
+  const otsuOpacityVal = document.getElementById('otsu-opacity-val');
+  const otsuIslandsToggle = document.getElementById('otsu-islands-toggle');
+  const otsuPocketsToggle = document.getElementById('otsu-pockets-toggle');
+  let otsuNoIslands = false, otsuNoPockets = false;
+  function otsuSrc() {
+    if (otsuNoIslands && otsuNoPockets) return 'otsu_overlay_clean.png';
+    if (otsuNoIslands) return 'otsu_overlay_noislands.png';
+    if (otsuNoPockets) return 'otsu_overlay_nopockets.png';
+    return 'otsu_overlay.png';
+  }
+  function applyOtsuOpacity() {
+    otsuImg.style.opacity = otsuToggle.checked ? otsuOpacitySlider.value / 100 : 0;
+  }
+  otsuToggle.addEventListener('change', applyOtsuOpacity);
+  otsuOpacitySlider.addEventListener('input', () => {
+    otsuOpacityVal.textContent = otsuOpacitySlider.value + '%';
+    applyOtsuOpacity();
+  });
+  otsuIslandsToggle.addEventListener('click', () => {
+    otsuNoIslands = !otsuNoIslands;
+    otsuIslandsToggle.classList.toggle('active', otsuNoIslands);
+    otsuImg.src = otsuSrc();
+  });
+  otsuPocketsToggle.addEventListener('click', () => {
+    otsuNoPockets = !otsuNoPockets;
+    otsuPocketsToggle.classList.toggle('active', otsuNoPockets);
+    otsuImg.src = otsuSrc();
   });
 
   const bandToggle = document.getElementById('band-toggle');

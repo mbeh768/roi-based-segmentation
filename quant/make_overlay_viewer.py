@@ -25,8 +25,10 @@ import tifffile
 OVERLAY_COLOR = (255, 255, 255)  # white
 BAND_COLOR = (255, 140, 0)  # orange, for the eroded (shrunk) offset band
 BAND_GROW_COLOR = (0, 191, 165)  # teal, for pixels newly added by a dilate (grow) offset
+OTSU_COLOR = (255, 0, 255)  # magenta, for the Otsu-threshold foreground overlay
 DIST_CLIP = 60  # px; keeps signed distance in [-60, 60], packed into 2 uint8 channels (+60)
 POCKET_FRAC = 0.10  # remove connected foreground regions <= this fraction of the largest region's area
+OTSU_ISLAND_FRAC = 0.05  # otsu "remove islands" cutoff, as a fraction of the largest otsu foreground blob's area
 
 
 def load_rgb_uint8(path):
@@ -97,6 +99,50 @@ def remove_pockets(mask, frac=POCKET_FRAC):
     return np.isin(labels, list(keep))
 
 
+def otsu_foreground(base_bgr):
+    """Global Otsu threshold on the red channel (this project's fluorescence
+    RGB exports carry the strongest tissue/background separation on R --
+    see quantify_intensity.py's R/G/B band-intensity split), foreground =
+    brighter class (fluorescent tissue), background = darker class (the
+    near-black background these images are shot against -- confirmed
+    empirically: background corner pixels read ~0, tissue reads tens-to-
+    hundreds). Used as a cheap validity check for whether a single global
+    intensity threshold can locate the epicardial boundary (tissue/background
+    edge) as a stand-in for the annotated mask."""
+    red = base_bgr[..., 2]
+    _, fg = cv2.threshold(red, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return fg.astype(bool)
+
+
+def fill_enclosed_holes(mask, frac=POCKET_FRAC):
+    """Fill background components fully enclosed by foreground (i.e. not
+    touching the image border) whose area is <= frac * the area of the
+    largest foreground component -- 'pockets' of background surrounded by
+    tissue, as opposed to islands of isolated foreground (see
+    remove_pockets, which does the reverse: dropping small foreground
+    blobs)."""
+    fg_num_labels, _, fg_stats, _ = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8), connectivity=8)
+    if fg_num_labels <= 1:
+        return mask.copy()
+    largest_fg = fg_stats[1:, cv2.CC_STAT_AREA].max()
+
+    h, w = mask.shape
+    bg_num_labels, bg_labels, bg_stats, _ = cv2.connectedComponentsWithStats(
+        (~mask).astype(np.uint8), connectivity=8)
+    result = mask.copy()
+    for i in range(1, bg_num_labels):
+        x, y, bw, bh, area = bg_stats[i, [cv2.CC_STAT_LEFT, cv2.CC_STAT_TOP,
+                                           cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT,
+                                           cv2.CC_STAT_AREA]]
+        touches_border = x == 0 or y == 0 or x + bw == w or y + bh == h
+        if touches_border:
+            continue
+        if area <= frac * largest_fg:
+            result[bg_labels == i] = True
+    return result
+
+
 def downsample(arr, max_dim, interp):
     h, w = arr.shape[:2]
     scale = max_dim / max(h, w)
@@ -147,6 +193,23 @@ def render_viewer(outdir, base_bgr, mask_small, stem, mask_label, band_max_offse
     overlay_clean[mask_clean, 3] = 255
     cv2.imwrite(str(outdir / 'mask_overlay_clean.png'), overlay_clean)
 
+    def write_otsu_overlay(m, filename):
+        overlay = np.zeros((h, w, 4), dtype=np.uint8)
+        overlay[m, 0] = OTSU_COLOR[2]
+        overlay[m, 1] = OTSU_COLOR[1]
+        overlay[m, 2] = OTSU_COLOR[0]
+        overlay[m, 3] = 255
+        cv2.imwrite(str(outdir / filename), overlay)
+
+    otsu_mask = otsu_foreground(base_bgr)
+    otsu_mask_noislands = remove_pockets(otsu_mask, frac=OTSU_ISLAND_FRAC)
+    otsu_mask_nopockets = fill_enclosed_holes(otsu_mask, frac=POCKET_FRAC)
+    otsu_mask_clean = fill_enclosed_holes(otsu_mask_noislands, frac=POCKET_FRAC)
+    write_otsu_overlay(otsu_mask, 'otsu_overlay.png')
+    write_otsu_overlay(otsu_mask_noislands, 'otsu_overlay_noislands.png')
+    write_otsu_overlay(otsu_mask_nopockets, 'otsu_overlay_nopockets.png')
+    write_otsu_overlay(otsu_mask_clean, 'otsu_overlay_clean.png')
+
     def encode_dist_b64(m):
         dist_map = signed_distance_encoded(m, clip=DIST_CLIP)
         ok, dist_png_bytes = cv2.imencode('.png', dist_map)
@@ -175,11 +238,13 @@ def render_viewer(outdir, base_bgr, mask_small, stem, mask_label, band_max_offse
   #bar label {{ font-size: 13px; color: #bbb; }}
   #opacity, #offset-x, #offset-y, #band-offset {{ width: 160px; }}
   #opacity-val, #offset-x-val, #offset-y-val, #band-offset-val {{ font-size: 13px; color: #fff; width: 3.5em; }}
-  #reset-offset, #pockets-toggle {{ font-size: 12px; color: #ddd; background: #333; border: 1px solid #444;
+  #reset-offset, #pockets-toggle, #otsu-islands-toggle, #otsu-pockets-toggle {{
+                    font-size: 12px; color: #ddd; background: #333; border: 1px solid #444;
                     border-radius: 4px; padding: 4px 8px; cursor: pointer; }}
-  #reset-offset:hover, #pockets-toggle:hover {{ background: #3a3a3a; }}
-  #pockets-toggle.active {{ background: #2d6a3e; border-color: #3a8a51; color: #fff; }}
-  #pockets-toggle.active:hover {{ background: #357a48; }}
+  #reset-offset:hover, #pockets-toggle:hover, #otsu-islands-toggle:hover, #otsu-pockets-toggle:hover {{ background: #3a3a3a; }}
+  #pockets-toggle.active, #otsu-islands-toggle.active, #otsu-pockets-toggle.active {{
+                    background: #2d6a3e; border-color: #3a8a51; color: #fff; }}
+  #pockets-toggle.active:hover, #otsu-islands-toggle.active:hover, #otsu-pockets-toggle.active:hover {{ background: #357a48; }}
   #bar-row2 {{ display: flex; align-items: center; gap: 12px; padding: 8px 16px;
                background: #1e1e1e; border-bottom: 1px solid #333; }}
   #hint {{ font-size: 12px; color: #888; margin-left: auto; }}
@@ -191,6 +256,9 @@ def render_viewer(outdir, base_bgr, mask_small, stem, mask_label, band_max_offse
                 width: {w}px; height: {h}px; user-select: none; pointer-events: none; }}
   #mask {{ opacity: 0.5; }}
   #band {{ display: none; opacity: 0.55; }}
+  #otsu {{ opacity: 0; }}
+  #bar-row3 {{ display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+               background: #1e1e1e; border-bottom: 1px solid #333; }}
 </style>
 </head>
 <body>
@@ -216,10 +284,20 @@ def render_viewer(outdir, base_bgr, mask_small, stem, mask_label, band_max_offse
   <span id="band-offset-val">0px</span>
   <span id="band-hint" style="font-size:12px; color:#888;">positive = grow (dilate): teal = added mass; negative = shrink (erode): orange = surviving region</span>
 </div>
+<div id="bar-row3">
+  <label><input type="checkbox" id="otsu-toggle"> show Otsu threshold foreground</label>
+  <label for="otsu-opacity">opacity</label>
+  <input id="otsu-opacity" type="range" min="0" max="100" value="50">
+  <span id="otsu-opacity-val">50%</span>
+  <button id="otsu-islands-toggle" title="drop isolated foreground blobs &lt;= {int(OTSU_ISLAND_FRAC * 100)}% the size of the largest blob">remove islands (&lt;={int(OTSU_ISLAND_FRAC * 100)}%)</button>
+  <button id="otsu-pockets-toggle" title="fill enclosed background holes &lt;= {int(POCKET_FRAC * 100)}% the size of the largest foreground blob">remove pockets (&lt;={int(POCKET_FRAC * 100)}%)</button>
+  <span style="font-size:12px; color:#888;">magenta = pixels classified foreground (tissue) by a global Otsu threshold on the red channel -- validity check against the {mask_label} boundary as an epicardium detector</span>
+</div>
 <div id="viewport">
   <div id="stage">
     <img id="base" src="base.png">
     <img id="mask" src="mask_overlay.png">
+    <img id="otsu" src="otsu_overlay.png">
     <canvas id="band" width="{w}" height="{h}"></canvas>
   </div>
 </div>
@@ -258,6 +336,38 @@ def render_viewer(outdir, base_bgr, mask_small, stem, mask_label, band_max_offse
       await loadDistMap(pocketsRemoved);
       scheduleRenderBand();
     }}
+  }});
+
+  const otsuToggle = document.getElementById('otsu-toggle');
+  const otsuImg = document.getElementById('otsu');
+  const otsuOpacitySlider = document.getElementById('otsu-opacity');
+  const otsuOpacityVal = document.getElementById('otsu-opacity-val');
+  const otsuIslandsToggle = document.getElementById('otsu-islands-toggle');
+  const otsuPocketsToggle = document.getElementById('otsu-pockets-toggle');
+  let otsuNoIslands = false, otsuNoPockets = false;
+  function otsuSrc() {{
+    if (otsuNoIslands && otsuNoPockets) return 'otsu_overlay_clean.png';
+    if (otsuNoIslands) return 'otsu_overlay_noislands.png';
+    if (otsuNoPockets) return 'otsu_overlay_nopockets.png';
+    return 'otsu_overlay.png';
+  }}
+  function applyOtsuOpacity() {{
+    otsuImg.style.opacity = otsuToggle.checked ? otsuOpacitySlider.value / 100 : 0;
+  }}
+  otsuToggle.addEventListener('change', applyOtsuOpacity);
+  otsuOpacitySlider.addEventListener('input', () => {{
+    otsuOpacityVal.textContent = otsuOpacitySlider.value + '%';
+    applyOtsuOpacity();
+  }});
+  otsuIslandsToggle.addEventListener('click', () => {{
+    otsuNoIslands = !otsuNoIslands;
+    otsuIslandsToggle.classList.toggle('active', otsuNoIslands);
+    otsuImg.src = otsuSrc();
+  }});
+  otsuPocketsToggle.addEventListener('click', () => {{
+    otsuNoPockets = !otsuNoPockets;
+    otsuPocketsToggle.classList.toggle('active', otsuNoPockets);
+    otsuImg.src = otsuSrc();
   }});
 
   const bandToggle = document.getElementById('band-toggle');
@@ -405,6 +515,10 @@ def render_viewer(outdir, base_bgr, mask_small, stem, mask_label, band_max_offse
     print(f"saved -> {outdir / 'base.png'}")
     print(f"saved -> {outdir / 'mask_overlay.png'}")
     print(f"saved -> {outdir / 'mask_overlay_clean.png'}")
+    print(f"saved -> {outdir / 'otsu_overlay.png'}")
+    print(f"saved -> {outdir / 'otsu_overlay_noislands.png'}")
+    print(f"saved -> {outdir / 'otsu_overlay_nopockets.png'}")
+    print(f"saved -> {outdir / 'otsu_overlay_clean.png'}")
 
 
 def main(args):
