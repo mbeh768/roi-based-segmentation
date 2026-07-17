@@ -261,9 +261,9 @@ def predict_prob_map(img_path, model, device, p, config, roi_path=None, roi_idx=
 
 
 def run_one(img_path, mask_path, model, device, p, threshold, title, output=None,
-            roi_path=None, config=None, roi_idx=None):
+            roi_path=None, config=None, roi_idx=None, roi=None):
     prob_map, info = predict_prob_map(img_path, model, device, p, config,
-                                      roi_path=roi_path, roi_idx=roi_idx)
+                                      roi_path=roi_path, roi_idx=roi_idx, roi=roi)
     full_arr    = info['full_arr']
     tile_coords = info['tile_coords']
     keep_idx    = info['keep_idx']
