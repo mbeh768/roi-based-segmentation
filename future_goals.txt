@@ -1,3 +1,0 @@
-- Improve UI
-- Quatification process demo ready
-    - compare to photoshop results
