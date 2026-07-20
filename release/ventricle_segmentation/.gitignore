@@ -1,0 +1,13 @@
+# The environment the launchers build on the collaborator's machine.
+.venv/
+__pycache__/
+*.pyc
+
+# Model weights are distributed via Hugging Face, not git (58 MB).
+# Place model_best.pth here before zipping this folder for collaborators.
+model_best.pth
+
+# Outputs, if anyone runs the tool from inside this folder.
+*_mask.tiff
+*_roi.pt
+*_preview.png
