@@ -186,6 +186,47 @@ def report_per_slide(runs):
               f"min={min(vals):.4f}  max={max(vals):.4f}")
 
 
+def report_test(runs):
+    """Aggregate the held-out test scores written by train.py after each fold.
+
+    This is the number to report. val_iou is NOT: early stopping and
+    best-checkpoint selection both read the validation cases, so that metric has
+    already been optimised against. The test case in each fold was never trained
+    on and never seen by model selection, and every case is tested exactly once.
+    """
+    print("\n=== held-out TEST (each case tested exactly once) ===")
+    print(f"{'fold':>4}  {'test case(s)':<40} {'tiles':>6} {'best_ep':>8} {'test_iou':>9} {'test_loss':>10}")
+    ious, missing = [], []
+    for fold, _cfg, _info_log, ckpt in runs:
+        res_path = ckpt.parent / 'test_results.json'
+        if not res_path.exists():
+            missing.append(fold)
+            print(f"{fold:>4}  {'-- no test_results.json (fold incomplete?) --':<40}")
+            continue
+        r = read_json(res_path)
+        cases = ', '.join(r.get('test_cases') or [])
+        iou = r.get('test_iou', float('nan'))
+        print(f"{fold:>4}  {cases:<40} {r.get('n_test_tiles', 0):>6} "
+              f"{str(r.get('best_epoch', '?')):>8} {iou:>9.4f} {r.get('test_loss', float('nan')):>10.4f}")
+        if iou == iou:
+            ious.append((iou, cases))
+
+    if not ious:
+        return
+    vals = [i for i, _ in ious]
+    n = len(vals)
+    mean = statistics.mean(vals)
+    sd = statistics.stdev(vals) if n > 1 else 0.0
+    print(f"\n  test_iou: {mean:.4f} +/- {sd:.4f}  (min {min(vals):.4f}, max {max(vals):.4f}, n={n})")
+    if missing:
+        print(f"  NOTE: {len(missing)} fold(s) missing test results {missing} — "
+              f"aggregate is partial.")
+    worst = sorted(ious)[:3]
+    print("  hardest cases: " + "; ".join(f"{c} {v:.4f}" for v, c in worst))
+    print(f"\n  --> report: held-out IoU {mean:.3f} +/- {sd:.3f} "
+          f"({n}-fold leave-one-case-out)")
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -200,6 +241,7 @@ if __name__ == '__main__':
     if not runs:
         raise SystemExit(f"No fold runs found for name='{a.name}' under {a.models_dir}")
     print(f"found {len(runs)} fold run(s): folds {[r[0] for r in runs]}")
+    report_test(runs)
     report_per_fold(runs)
     if a.per_slide:
         report_per_slide(runs)
