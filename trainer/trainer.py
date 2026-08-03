@@ -10,6 +10,14 @@ import torch.nn.functional as F
 from utils import inf_loop, MetricTracker
 
 
+def _maybe_channels_last(x, enabled):
+    """NHWC only applies to 4D image tensors -- `pos` is (B, 4) and must be left
+    alone, so this is a no-op for anything that isn't a batch of feature maps."""
+    if enabled and x.dim() == 4:
+        return x.contiguous(memory_format=torch.channels_last)
+    return x
+
+
 class Trainer(BaseTrainer):
     """
     Trainer class
@@ -33,6 +41,7 @@ class Trainer(BaseTrainer):
         self.log_step = int(np.sqrt(data_loader.batch_size))
 
         self.aux_loss_weight = config['trainer'].get('aux_loss_weight', 0.0)
+        self.channels_last = config['trainer'].get('channels_last', False)
 
         switch_cfg = config['trainer'].get('loss_switch', None)
         self._switch_cfg  = switch_cfg   # {trigger_metric, threshold, loss} or None
@@ -118,6 +127,9 @@ class Trainer(BaseTrainer):
             n_val = _dump(_stems(val_ds, val_idx), val_ds, out_root / 'val')
             self.logger.info(f'Saved {n_val} val globals to {out_root / "val"}')
 
+    def _to_device(self, x):
+        return _maybe_channels_last(x.to(self.device), self.channels_last)
+
     def _train_epoch(self, epoch):
         """
         Training logic for an epoch
@@ -149,22 +161,25 @@ class Trainer(BaseTrainer):
             else:
                 *raw_inputs, target = batch
                 aux_target = None
-            inputs = [x.to(self.device) for x in raw_inputs]
+            inputs = [self._to_device(x) for x in raw_inputs]
             target = target.to(self.device)
 
             self.optimizer.zero_grad()
-            output = self.model(*inputs)
-            if isinstance(output, tuple):
-                main_out, aux_out = output
-                main_loss = self.criterion(main_out, target)
-                if aux_target is not None:
-                    loss = main_loss + self.aux_loss_weight * self.criterion(aux_out, aux_target)
+            # autocast covers forward + loss only; backward runs outside it and
+            # inherits the dtypes autocast recorded. bf16 needs no GradScaler.
+            with torch.autocast('cuda', dtype=self.amp_dtype, enabled=self.amp):
+                output = self.model(*inputs)
+                if isinstance(output, tuple):
+                    main_out, aux_out = output
+                    main_loss = self.criterion(main_out, target)
+                    if aux_target is not None:
+                        loss = main_loss + self.aux_loss_weight * self.criterion(aux_out, aux_target)
+                    else:
+                        loss = main_loss
+                    output = main_out  # for metrics
                 else:
-                    loss = main_loss
-                output = main_out  # for metrics
-            else:
-                main_loss = None
-                loss = self.criterion(output, target)
+                    main_loss = None
+                    loss = self.criterion(output, target)
             loss.backward()
             self.optimizer.step()
 
@@ -220,13 +235,14 @@ class Trainer(BaseTrainer):
                     *raw_inputs, target, _ = batch  # strip global_mask, not used in validation
                 else:
                     *raw_inputs, target = batch
-                inputs = [x.to(self.device) for x in raw_inputs]
+                inputs = [self._to_device(x) for x in raw_inputs]
                 target = target.to(self.device)
 
-                output = self.model(*inputs)
-                if isinstance(output, tuple):
-                    output = output[0]
-                loss = self.criterion(output, target)
+                with torch.autocast('cuda', dtype=self.amp_dtype, enabled=self.amp):
+                    output = self.model(*inputs)
+                    if isinstance(output, tuple):
+                        output = output[0]
+                    loss = self.criterion(output, target)
 
                 self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.valid_metrics.update('loss', loss.item())

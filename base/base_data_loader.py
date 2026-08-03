@@ -24,6 +24,13 @@ class BaseDataLoader(DataLoader):
             'collate_fn': collate_fn,
             'num_workers': num_workers
         }
+        # Worker processes are torn down and respawned at every epoch boundary by
+        # default, and with an epoch this short (~90 batches) that startup is a
+        # measurable slice of wall-time -- paid twice over, since the validation
+        # loader below respawns its own pool too. Keeping them alive removes it.
+        # Only valid when workers exist; num_workers=0 must not carry the flag.
+        if num_workers > 0:
+            self.init_kwargs['persistent_workers'] = True
         super().__init__(sampler=self.sampler, **self.init_kwargs)
 
     def _split_sampler(self, split):

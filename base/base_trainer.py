@@ -22,6 +22,16 @@ class BaseTrainer:
         self.save_period = cfg_trainer['save_period']
         self.monitor = cfg_trainer.get('monitor', 'off')
 
+        # Mixed precision. Opt-in per config so existing experiments keep their
+        # fp32 numerics. bf16 is the default dtype because it shares fp32's
+        # exponent range -- no GradScaler and no overflow handling needed, unlike
+        # fp16. This workload is memory-bandwidth bound, so halving activation
+        # bytes is where the speedup comes from; engaging tensor cores is a bonus.
+        self.amp = bool(cfg_trainer.get('amp', False))
+        self.amp_dtype = getattr(torch, cfg_trainer.get('amp_dtype', 'bfloat16'))
+        if self.amp:
+            self.logger.info('AMP enabled (%s)', self.amp_dtype)
+
         # configuration to monitor model performance and save best
         if self.monitor == 'off':
             self.mnt_mode = 'off'

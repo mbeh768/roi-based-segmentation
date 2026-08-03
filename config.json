@@ -1,7 +1,6 @@
 {
     "name": "EXPERIMENT 10A_old [wholistic performance evaluation]",
     "n_gpu": 1,
-
     "arch": {
         "type": "ImageNetPretrainedLocalUNet",
         "args": {
@@ -22,7 +21,7 @@
             "batch_size": 40,
             "shuffle": true,
             "validation_split": 0.3,
-            "num_workers": 0,
+            "num_workers": 8,
             "hflip": 0.5,
             "vflip": 0.5,
             "rot90": 0.75,
@@ -30,7 +29,8 @@
             "require_roi": true,
             "roi_jitter": 0.0,
             "roi_exclusion": true,
-            "roi_exclusion_radius": 0.0
+            "roi_exclusion_radius": 0.0,
+            "n_val_cases": 3
         }
     },
     "optimizer": {
@@ -50,7 +50,7 @@
         "type": "CosineAnnealingLR",
         "args": {
             "T_max": 800,
-            "eta_min": 1e-5
+            "eta_min": 1e-05
         }
     },
     "preprocess": {
@@ -73,6 +73,10 @@
         "monitor": "min val_loss",
         "early_stop": 100,
         "tensorboard": true,
-        "aux_loss_weight": 0.0
+        "aux_loss_weight": 0.0,
+        "amp": true,
+        "amp_dtype": "bfloat16",
+        "channels_last": true,
+        "cudnn_benchmark": true
     }
 }
