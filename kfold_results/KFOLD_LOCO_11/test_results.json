@@ -1,0 +1,15 @@
+{
+    "test_iou": 0.988717794418335,
+    "test_accuracy": 0.9936952781677245,
+    "test_loss": 0.10992242991924286,
+    "test_cases": [
+        "17P391_7A"
+    ],
+    "val_cases": [
+        "17P645-1",
+        "AJK056-10",
+        "AJKY121-7-2"
+    ],
+    "best_epoch": 264,
+    "n_test_tiles": 174
+}

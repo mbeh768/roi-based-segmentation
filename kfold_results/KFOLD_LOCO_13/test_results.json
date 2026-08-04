@@ -1,0 +1,15 @@
+{
+    "test_iou": 0.94077201684316,
+    "test_accuracy": 0.978960049386118,
+    "test_loss": 0.14499664244552454,
+    "test_cases": [
+        "AJKY121-9"
+    ],
+    "val_cases": [
+        "AJKV056-7",
+        "21PControl_4",
+        "21PControl-2"
+    ],
+    "best_epoch": 54,
+    "n_test_tiles": 457
+}
