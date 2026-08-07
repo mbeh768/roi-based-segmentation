@@ -35,41 +35,11 @@ from pathlib import Path
 
 import torch
 
-# (k_rot90, hflip) for the 8 elements of the square's symmetry group, in the
-# order training indexes them.
-DIHEDRAL = [(0, False), (1, False), (2, False), (3, False),
-            (0, True),  (1, True),  (2, True),  (3, True)]
-
-# Neighbour slots, row-major over (dy, dx) in units of the neighbour offset:
-#   0 NW  1 N  2 NE
-#   3 W   4 C  5 E
-#   6 SW  7 S  8 SE
-NEIGHBOUR_OFFSETS = [(-1, -1), (-1, 0), (-1, 1),
-                     ( 0, -1), ( 0, 0), ( 0, 1),
-                     ( 1, -1), ( 1, 0), ( 1, 1)]
-
-
-def apply_dihedral(t, k):
-    """Apply dihedral element k to a [...,H,W] tensor."""
-    rot, flip = DIHEDRAL[k]
-    if flip:
-        t = torch.flip(t, dims=[-1])
-    if rot:
-        t = torch.rot90(t, k=rot, dims=[-2, -1])
-    return t
-
-
-def neighbour_perm(k):
-    """Where each neighbour slot lands under dihedral element k.
-
-    Returns perm such that out_slot[i] = in_slot[perm[i]]: the tile that should
-    occupy slot i of the transformed grid is the one at perm[i] of the original.
-    Derived by transforming the slot coordinates themselves, so it cannot drift
-    out of sync with apply_dihedral.
-    """
-    grid = torch.arange(9).reshape(3, 3)
-    moved = apply_dihedral(grid, k)
-    return moved.reshape(9).tolist()
+# Single source of truth, shared with the data loader -- see utils/dihedral.py
+# for why the orientation index, the neighbour permutation and the augmenter
+# parameter mapping must all be derived rather than hand-written.
+from utils.dihedral import (DIHEDRAL, NEIGHBOUR_OFFSETS, apply_dihedral,
+                            neighbour_perm, self_test)
 
 
 def build_encoder(cfg, device):
@@ -82,32 +52,9 @@ def build_encoder(cfg, device):
     return m
 
 
-def verify(device):
-    """Check the dihedral/permutation contract before writing 40GB of cache.
-
-    Builds a grid whose tiles are distinguishable, transforms it two ways --
-    as one big image, and as tiles that are individually transformed then
-    reordered by neighbour_perm -- and asserts the results match. This is the
-    failure mode that would otherwise produce a plausible-looking bad model.
-    """
-    torch.manual_seed(0)
-    T = 4                                    # tile size for the toy check
-    tiles = [torch.randn(1, T, T) for _ in range(9)]
-    big = torch.cat([torch.cat([tiles[r * 3 + c] for c in range(3)], dim=-1)
-                     for r in range(3)], dim=-2)
-    ok = True
-    for k in range(8):
-        want = apply_dihedral(big, k)
-        perm = neighbour_perm(k)
-        got_tiles = [apply_dihedral(tiles[perm[i]], k) for i in range(9)]
-        got = torch.cat([torch.cat([got_tiles[r * 3 + c] for c in range(3)], dim=-1)
-                         for r in range(3)], dim=-2)
-        same = torch.equal(want, got)
-        ok &= same
-        print(f"  k={k} rot={DIHEDRAL[k][0]} flip={str(DIHEDRAL[k][1]):<5} "
-              f"perm={perm}  {'OK' if same else 'MISMATCH'}")
-    print("\n  dihedral/permutation contract:", "VERIFIED" if ok else "*** BROKEN ***")
-    return ok
+def verify(device=None):
+    """Check the shared geometry contracts before writing 40GB of cache."""
+    return self_test(verbose=True)
 
 
 def main():
