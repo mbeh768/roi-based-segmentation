@@ -20,10 +20,16 @@ LOG=$REPO/EXPERIMENT13/logs
 mkdir -p "$LOG"
 export MKL_THREADING_LAYER=GNU
 
+# The conda env explicitly: gpu-box's `python3` is the system interpreter and has
+# no numpy/torch. run_kfold launches train.py via sys.executable, so setting it
+# here carries through to the children.
+PY=/mnt/500GBnvme/miniconda3/envs/giacomelli/bin/python
+"$PY" -c "import numpy, torch" || { echo "FATAL: $PY cannot import numpy/torch"; exit 1; }
+
 cd "$REPO"
 for arm in EXPERIMENT_13 EXPERIMENT_13_CONTROL; do
     echo "[$(date '+%F %T')] START $arm"
-    python3 utils/run_kfold.py \
+    "$PY" utils/run_kfold.py \
         --base-dir "$BASE" --repo "$REPO" \
         --config "$REPO/EXPERIMENT13/$arm.json" \
         --data-dir "data/[collapsed]t8192_ctx512_inner512_old" \
