@@ -26,10 +26,14 @@ def local(*a):
     return subprocess.run(a, capture_output=True, text=True).stdout.strip()
 
 
-def remote(script):
+def remote(script, stdout_only=False):
+    """stdout_only: git writes progress ("Reset branch ...") to stderr, which
+    interleaves unpredictably with stdout -- so anything being parsed, rather
+    than displayed, must read stdout alone."""
     r = subprocess.run(['ssh', '-o', 'BatchMode=yes', HOST,
                         f'cd {REPO} && {script}'], capture_output=True, text=True)
-    return r.returncode, (r.stdout + r.stderr).strip()
+    out = r.stdout.strip() if stdout_only else (r.stdout + r.stderr).strip()
+    return r.returncode, out
 
 
 def main():
@@ -52,16 +56,17 @@ def main():
                  f"run: git push -u origin {branch}")
 
     rc, out = remote(f'git fetch --depth 1 origin {branch} '
-                     f'&& git checkout -f -B {branch} origin/{branch} '
-                     f'&& git log --oneline -1 && git rev-parse HEAD')
+                     f'&& git checkout -f -B {branch} origin/{branch}')
     print(out)
     if rc != 0:
         sys.exit(f"deploy failed (rc={rc})")
 
-    remote_head = out.splitlines()[-1].strip()
+    # separate call, stdout only, so no progress chatter can be misread as a sha
+    _, remote_head = remote('git rev-parse HEAD', stdout_only=True)
+    _, desc = remote('git log --oneline -1', stdout_only=True)
     if remote_head != local_head:
         sys.exit(f"MISMATCH: local {local_head[:8]} != gpu-box {remote_head[:8]}")
-    print(f"\nOK: gpu-box is at {remote_head[:8]} on {branch} (matches local)")
+    print(f"\nOK: gpu-box at {remote_head[:8]} on {branch} (matches local)\n    {desc}")
 
 
 if __name__ == '__main__':
