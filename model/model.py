@@ -107,7 +107,8 @@ class ImageNetPretrainedLocalUNet(BaseModel):
                  freeze_local_encoder=False,
                  bottleneck_dropout=0.1,
                  use_roi=False, roi_ch=1,
-                 roi_inject='bottleneck', roi_interp='bilinear'):
+                 roi_inject='bottleneck', roi_interp='bilinear',
+                 decoder_half_depth=False, decoder_ch=None):
         super().__init__()
 
         self.use_roi = use_roi
@@ -161,18 +162,57 @@ class ImageNetPretrainedLocalUNet(BaseModel):
 
         self.bot_drop = nn.Dropout2d(bottleneck_dropout)
 
-        self.up5  = nn.ConvTranspose2d(c5 + self.roi_ch, c4, kernel_size=2, stride=2)
-        self.dec5 = _double_conv(c4 + c4 + skip_roi_ch, c4)
-        self.up4  = nn.ConvTranspose2d(c4, c3, kernel_size=2, stride=2)
-        self.dec4 = _double_conv(c3 + c3 + skip_roi_ch, c3)
-        self.up3  = nn.ConvTranspose2d(c3, c2, kernel_size=2, stride=2)
-        self.dec3 = _double_conv(c2 + c2 + skip_roi_ch, c2)
-        self.up2  = nn.ConvTranspose2d(c2, c1, kernel_size=2, stride=2)
-        self.dec2 = _double_conv(c1 + c1 + skip_roi_ch, c1)
-        self.up1  = nn.ConvTranspose2d(c1, c1, kernel_size=2, stride=2)
-        self.dec1 = _double_conv(c1 + skip_roi_ch, c1)
+        # ---- decoder ablations (EXPERIMENT 5D-5I) --------------------------
+        # decoder_half_depth (5D/5E): drop every other decoder level, so each
+        #   remaining ConvTranspose upsamples by 4 instead of 2 and skips are
+        #   consumed every other stage (s4 and s2 survive; s3 and s1 do not).
+        # decoder_ch (5F-5I): run the whole decoder at one fixed width, with 1x1
+        #   projections on the surviving skips. Most trainable parameters live in
+        #   up5+dec5 because c5=512/c4=256 dominate, so this is where the cuts
+        #   actually land. Stacks on half-depth, matching 5F ("identical to 5D
+        #   otherwise").
+        self.decoder_half_depth = bool(decoder_half_depth)
+        self.decoder_ch = decoder_ch
+        d = decoder_ch      # None => keep the original per-level widths
 
-        self.head = nn.Conv2d(c1, num_classes, kernel_size=1)
+        if self.decoder_half_depth:
+            # Levels kept: /32 -> /16 -> /4 -> /1, so the surviving skips are s4
+            # and s2 -- the pair 5F names ("1x1 projections on the s4 and s2
+            # skips"). s3 and s1 are dropped, and the two later ConvTransposes
+            # upsample 4x to span the gap.
+            w5 = d if d else c4
+            self.up5 = nn.ConvTranspose2d(c5 + self.roi_ch, w5, kernel_size=2, stride=2)
+            self.skip4 = nn.Conv2d(c4, w5, 1) if d else nn.Identity()
+            self.dec5 = _double_conv(w5 + (d if d else c4) + skip_roi_ch, w5)
+
+            w3 = d if d else c2
+            self.up3 = nn.ConvTranspose2d(w5, w3, kernel_size=4, stride=4)
+            self.skip2 = nn.Conv2d(c2, w3, 1) if d else nn.Identity()
+            self.dec3 = _double_conv(w3 + (d if d else c2) + skip_roi_ch, w3)
+
+            w1 = d if d else c1
+            self.up1 = nn.ConvTranspose2d(w3, w1, kernel_size=4, stride=4)
+            self.dec1 = _double_conv(w1 + skip_roi_ch, w1)
+            head_in = w1
+        else:
+            w5, w4, w3, w2, w1 = (d, d, d, d, d) if d else (c4, c3, c2, c1, c1)
+            self.up5  = nn.ConvTranspose2d(c5 + self.roi_ch, w5, kernel_size=2, stride=2)
+            self.skip4 = nn.Conv2d(c4, w5, 1) if d else nn.Identity()
+            self.dec5 = _double_conv(w5 + w5 + skip_roi_ch, w5)
+            self.up4  = nn.ConvTranspose2d(w5, w4, kernel_size=2, stride=2)
+            self.skip3 = nn.Conv2d(c3, w4, 1) if d else nn.Identity()
+            self.dec4 = _double_conv(w4 + w4 + skip_roi_ch, w4)
+            self.up3  = nn.ConvTranspose2d(w4, w3, kernel_size=2, stride=2)
+            self.skip2 = nn.Conv2d(c2, w3, 1) if d else nn.Identity()
+            self.dec3 = _double_conv(w3 + w3 + skip_roi_ch, w3)
+            self.up2  = nn.ConvTranspose2d(w3, w2, kernel_size=2, stride=2)
+            self.skip1 = nn.Conv2d(c1, w2, 1) if d else nn.Identity()
+            self.dec2 = _double_conv(w2 + w2 + skip_roi_ch, w2)
+            self.up1  = nn.ConvTranspose2d(w2, w1, kernel_size=2, stride=2)
+            self.dec1 = _double_conv(w1 + skip_roi_ch, w1)
+            head_in = w1
+
+        self.head = nn.Conv2d(head_in, num_classes, kernel_size=1)
 
     def forward(self, local, glob, pos, roi=None):
         # glob is accepted for signature compatibility with LocalGlobalDataLoader batches
@@ -196,11 +236,17 @@ class ImageNetPretrainedLocalUNet(BaseModel):
                 parts.append(roi_at(*up.shape[2:]))
             return torch.cat(parts, dim=1)
 
-        x = self.dec5(fuse(self.up5(x), s4))
-        x = self.bot_drop(x)
-        x = self.dec4(fuse(self.up4(x), s3))
-        x = self.dec3(fuse(self.up3(x), s2))
-        x = self.dec2(fuse(self.up2(x), s1))
+        if self.decoder_half_depth:
+            # s3 and s1 are deliberately unused: half-depth keeps every other skip
+            x = self.dec5(fuse(self.up5(x), self.skip4(s4)))
+            x = self.bot_drop(x)
+            x = self.dec3(fuse(self.up3(x), self.skip2(s2)))
+        else:
+            x = self.dec5(fuse(self.up5(x), self.skip4(s4)))
+            x = self.bot_drop(x)
+            x = self.dec4(fuse(self.up4(x), self.skip3(s3)))
+            x = self.dec3(fuse(self.up3(x), self.skip2(s2)))
+            x = self.dec2(fuse(self.up2(x), self.skip1(s1)))
         u1 = self.up1(x)
         if inject_skips:
             u1 = torch.cat([u1, roi_at(*u1.shape[2:])], dim=1)

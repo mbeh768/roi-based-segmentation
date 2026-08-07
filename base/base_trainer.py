@@ -29,8 +29,15 @@ class BaseTrainer:
         # bytes is where the speedup comes from; engaging tensor cores is a bonus.
         self.amp = bool(cfg_trainer.get('amp', False))
         self.amp_dtype = getattr(torch, cfg_trainer.get('amp_dtype', 'bfloat16'))
+        # fp16 has fp32's mantissa but a much narrower exponent, so small
+        # gradients flush to zero without loss scaling; bf16 keeps fp32's
+        # exponent range and needs none. Turing has no native bf16 (it emulates,
+        # ~4.7x slower here), so fp16 is the right choice on those cards.
+        self.scaler = torch.amp.GradScaler(
+            'cuda', enabled=bool(self.amp and self.amp_dtype == torch.float16))
         if self.amp:
-            self.logger.info('AMP enabled (%s)', self.amp_dtype)
+            self.logger.info('AMP enabled (%s, grad_scaler=%s)',
+                             self.amp_dtype, self.scaler.is_enabled())
 
         # configuration to monitor model performance and save best
         if self.monitor == 'off':

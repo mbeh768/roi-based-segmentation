@@ -807,7 +807,13 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     Expected: mean +/- std of val IoU across the 5 folds; mean should sit between 9K's best and worst seeds and is
     the number to report. If std is large the method is genuinely split-sensitive (small-n) and the paper should
     lead with the CV mean, never a single split.
-    Results:
+    Results: val IoU 0.9515 +/- 0.0198 across the 5 folds (min 0.9211, max 0.9762; val_loss 0.1274 +/- 0.0221).
+    Lands almost exactly on 9K's seed mean (0.9527 +/- 0.0139) as predicted, and the spread is comparable
+    (0.0198 vs 0.0139) - so the swing 9K saw really is the split moving, not init noise, and a single split is
+    not reportable. CAVEAT discovered later (see [EXPERIMENT 11]): this number is NOT a held-out estimate. The
+    fold being scored is also the set early_stop and "monitor: min val_loss" read, so model selection had already
+    optimised against it. 9L is a legitimate measure of split sensitivity but must not be quoted as generalisation
+    performance; 11 redoes it with a real train/val/test separation.
 
 
     [EXPERIMENT 9M] - post-hoc per-fold + per-slide variance analysis (utils/kfold_report.py)
@@ -823,4 +829,142 @@ exploring whether changing the BCE/Dice balance improves boundary quality and va
     Expected: a clean CV summary line for the paper, and a ranked per-slide IoU list; expect a handful of
     consistently-hard slides to dominate the variance rather than uniform noise (would confirm the 9K spread is a
     few outlier slides, which is characterizable).
-    Results:
+    Results: tooling works and is now the standard reporting path. The expectation that a few outlier slides
+    dominate the variance was confirmed, though at [EXPERIMENT 11]'s scale rather than 9L's - one slide
+    (17P645-1) alone triples the std. kfold_report.py has since gained report_test(), which aggregates held-out
+    test scores and runs BEFORE the val summary, because the val numbers it originally reported are
+    selection-contaminated (see the 9L caveat). The val table is kept as a diagnostic only.
+
+
+
+[EXPERIMENT 10] - wholistic performance evaluation (held-out pairs) -- not written up at the time
+recorded here so the numbering is not misleading. saved/models contains
+"EXPERIMENT 10A_old [wholistic performance evaluation]_1..8", and verification/ holds the audit trail
+(gather_evidence.py, build_report.py, held_out_verification_report.pdf) covering three pairs - AJK056-10,
+AJKY121-9, AJKY121-8 - each physically absent from its run's training set, with checksums and timestamp
+ordering recorded. Superseded as a performance claim by [EXPERIMENT 11], which tests every case rather than
+three, but the verification artifacts remain the provenance record.
+
+NOTE ON THE DEPLOYED MODEL: the shipped weights (release/ventricle_segmentation/model_best.pth, also on the
+hf remote) are named PRODUCTION_hf_release, epoch 180. That run has no directory in saved/ and no entry in
+this log; its only surviving provenance is the config embedded in the checkpoint. From that config it is the
+same architecture as everything below (ImageNetPretrainedLocalUNet, resnet18, frozen local encoder, ROI at
+bottleneck, bce_dice) trained on data/[collapsed]t8192_ctx512_inner512_old, but with batch_size 8 and a
+SINGLE 70/30 split at split_seed=1 - not cross-validated. It therefore trained on more slides than any fold
+below, and [EXPERIMENT 11]'s number is an estimate of THE METHOD's generalisation to an unseen slide, not a
+measurement of the shipped weights. Do not conflate them in the paper.
+
+
+[EXPERIMENT 11] - leave-one-case-out cross validation with a real train/val/test split
+the number for the paper. Supersedes [EXPERIMENT 9L], which was not a held-out estimate.
+("leave-one-case-out" = 14 models, each holding out exactly one case; run dirs are named KFOLD_LOCO*)
+
+    the two problems with 9L:
+    1. PAIRED SLIDES SPLIT ACROSS THE BOUNDARY. 6 of the 20 slides are two physical halves of one tissue
+       sample; holding out one half while training on its twin leaks adjacent tissue. Pairs are derived from
+       FILENAMES, not directories - pairs do not reliably share a folder. Encoded as CASE_GROUPS in
+       data_loader/data_loaders.py; the split partitions by case, collapsing 20 slides -> 14 cases.
+       Non-obvious calls: AJK056-10-2of2 + AJKV056-10-1-of-2 are one case despite the AJK/AJKV spelling
+       mismatch (typo in the source filename, corroborated by verification/gather_evidence.py's PAIRS dict);
+       AJKY121-7-2 looks like half a pair but its partner is absent from the dataset, so it is a singleton;
+       21PControl-1 and -2 are NOT a pair - that numbering marks distinct patients, and only an explicit
+       of2/-of- suffix means two halves of one sample.
+    2. VALIDATION == TEST. early_stop and "monitor: min val_loss" both read the held-out fold, so model
+       selection had already optimised against the reported number.
+
+    design: 14 folds, one per case, each case tested exactly once. Per fold 10 train / 3 val / 1 test cases.
+    Validation is carved from the non-test remainder and rotates with the fold. The test case is scored ONCE,
+    after training, by the checkpoint early stopping already picked from the val cases - written to
+    saved/models/<run>/test_results.json by train.py. Verified at the loader level: zero stem overlap and zero
+    case overlap between train/val, train/test and val/test, and no fold's test case appears in its own val
+    set. Otherwise identical to the 9I baseline (frozen ImageNet local encoder, bottleneck ROI, bce_dice,
+    tiling_size=8192, roi_exclusion_radius=0.0, batch 40, early_stop 100).
+
+    metric: SLIDE-level IoU is the headline. Predictions for every held-out tile are stitched onto the slide
+    canvas, averaged where tiles overlap (stride 256 with 512px tiles means interior pixels are covered 4x),
+    thresholded once, then compared to stitched ground truth. The per-batch-mean tile IoU used during training
+    weights a batch of near-empty tiles the same as a batch full of ventricle and reads lower on every case.
+    Test-time IoU also thresholds the target: background is stored as ~0.0157 rather than 0.0 on some slides,
+    inflating target.sum() and hence the union, depressing IoU by ~0.026 (0.8060 -> 0.8316 measured).
+    run: python3 utils/run_kfold.py --repo . --data-dir <dir> --name KFOLD_LOCO
+         python3 utils/kfold_report.py --name KFOLD_LOCO
+         python3 utils/slide_level_iou.py --name KFOLD_LOCO --out slide_level_iou.json
+         python3 utils/build_kfold_report.py --name KFOLD_LOCO --slide-json ... --out <pdf>
+    Expected: a defensible generalisation number, lower than 9L's 0.9515 because selection optimism is removed.
+    Results: slide-level IoU 0.9243 +/- 0.0748 across all 14 cases; 0.9427 +/- 0.0304 excluding 17P645-1.
+    Tile-level (per-batch mean) 0.9190 +/- 0.0788; tile-weighted 0.9360. Per-case range 0.685 - 0.989.
+    Nearly all the variance is one slide: 17P645-1 scores 0.6851, and its source directory is literally named
+    "17P645-1 (validated) (channel issue)" - a sectioning defect recorded before this experiment ran. It is
+    REPORTED, not dropped: it was in the training data for the other 13 folds, and removing a case after seeing
+    it score badly is selection on the outcome. The excl-defective figure is a sensitivity analysis whose
+    exclusion is justified by input data quality, not by score. Paired cases average 0.939 vs 0.904 for
+    singletons, so pair grouping mattered in the predicted direction - splitting pairs would have inflated the
+    number. Report PDF + JSON in kfold_results/.
+    Two nuisance findings worth carrying forward:
+    (a) the test loader shares the dataset object with training, whose augmentation is always on, so every
+        held-out tile was scored under one random flip/rot90 draw - this applies to EVERY val_iou in this log.
+        Measured properly (batch size and seed fixed, pooled IoU) the effect is +0.0002 +/- 0.0044, i.e. nil.
+    (b) run_kfold's resume logic originally treated a fold as complete if model_best.pth existed; that file
+        appears at the first improving epoch, so an interrupted fold was silently skipped on resume. It now
+        requires test_results.json.
+
+
+    [EXPERIMENT 11A] - where the residual error actually is (utils/error_profile.py)
+    analysis of 11's checkpoints, not a training run. Stitches each fold's held-out prediction and decomposes
+    the error into: pixels within +/-8px of the true boundary; false-positive components touching no true
+    component ("islands" - the specks 9F/9G/9H tried to suppress); false negatives enclosed by prediction
+    ("holes"); and the remainder.
+    Expected: settle whether a continuity/topology loss is worth another attempt after the pocket-loss failure.
+    Results: boundary 41.2%, islands 11.9%, holes 12.7%, bulk 34.2%. Categories OVERLAP (an island near the
+    boundary counts in both), so these are shares, not a partition, and "bulk" is a lower bound. FP:FN =
+    2.43M : 3.05M, i.e. mild under-segmentation. Computed from the saved counts, perfect island removal is
+    worth +0.0066 slide IoU and perfect hole filling a further +0.0060 - a hard ceiling of ~+0.013 for ANY
+    topology method. That explains 9F/9G/9H: the pocket loss perturbed the gradient everywhere to chase ~12%
+    of the error, and at pocket_weight=1.0 the collateral damage (0.8302) swamped the gain. Islands are
+    already stripped post hoc in deployment, so the remaining topology headroom is only the holes (~+0.006).
+    The largest bucket is ordinary boundary imprecision, which no topology term addresses.
+
+
+[EXPERIMENT 12] - decoder ablation, revisiting 5D-5I at [EXPERIMENT 11] rigour
+[EXPERIMENT 6] excluded decoder narrowing ("will be addressed separately once 6E is confirmed") and 5D-5I
+were left with blank or single-run results on the smaller dataset. This closes that thread.
+
+    arms, following the 5-series exactly (width stacks on half-depth, as 5F did - "identical to 5D otherwise"):
+      5E  half-depth    decoder levels dropped, surviving skips s4 and s2   2,808,769 params (86.9%)
+      5G  half + ch64   whole decoder at 64ch via 1x1 skip projections        578,945 params (17.9%)
+      5H  half + ch32                                                        182,977 params ( 5.7%)
+      5I  half + ch16                                                         64,865 params ( 2.0%)
+    champion for reference: 3,231,617 params.
+    protocol identical to [EXPERIMENT 11] but screening on folds 0-6 only (spans champion 0.898-0.972 and
+    excludes the defective 17P645-1). Run on the local RTX 4060 + RTX 2070, which cannot hold batch 40 (needs
+    ~26GB; the 8GB cards cap at micro-batch 8-40 depending on arm), so gradient accumulation keeps the
+    effective batch at 40. This is EXACT, not an approximation: dice_loss reduces per image and the model uses
+    GroupNorm, not BatchNorm - verified in float64 at 1.77e-15 max relative gradient error vs a true batch-40
+    step. fp16 rather than bf16 on both cards: Turing has no native bf16 and emulates it ~4.7x slower.
+    CONTROL: the unmodified architecture was re-run on local hardware, fold 0, to separate an architecture
+    effect from a hardware/precision one. It scored 0.9120 vs 0.9156 on the same fold - a gap of 0.0036, ~7x
+    smaller than the champion's own fold-to-fold spread - so ablation deltas are directly comparable and no
+    hardware correction is needed.
+    run: bash ABLATE/run_gpu0.sh ; bash ABLATE/run_gpu1.sh   (configs in ABLATE/)
+    Expected: find the minimum viable decoder given the ROI prior, per the 5I note "No damage to performance".
+    Results: NULL - stopped early, no arm beat the champion. 5G half+ch64 -0.0096 (4 folds), 5E half-depth
+    -0.0140 (5 folds), both consistently below the champion on every fold completed, against a measured noise
+    floor of 0.0036. Decoder capacity is not the binding constraint. Two things worth keeping: 5G reached
+    within ~0.01 IoU using 18% of the trainable parameters - a real efficiency result even though it is not an
+    accuracy one; and 5G beat 5E despite having 5x FEWER parameters, so the cost of half-depth is the lost
+    s3/s1 skips (resolution detail) rather than lost capacity, and 5G's 1x1 skip projections appear to partly
+    compensate. Convergence also slowed sharply as the decoder narrowed (best epoch 86 for 5E vs 328 for 5G),
+    which matters if patience is ever shortened. Partial results in ABLATE/partial_results.json.
+
+
+[EXPERIMENT 13]
+other than these changes pipeline is identical to [EXPERIMENT 9I]
+changes:
+1. novel extract_all.py runs the same imagenet extractor backbone as 9I on every extracted tile
+2. those features are saved to a sub folder under tile directory titled <tile_directory>/extracted/
+3. during model forward passes (both training and inference) the neighboring tiles (8 tiles in total) are concatenated at the bottleneck alongside their cropped roi regions
+
+NOTE:
+the overall effect of this is we now have many more channel dims at identical spatial dims at the bottleneck
+skip connections are preserved as is the rest of the model. the only thing that changes are the channel reductions in the decoder which should be made more agressive only in the convolution immediatley following the bottleneck
+only bottleneck concatenations and the first decoder convolution are affected

@@ -52,7 +52,13 @@ print("@@@" + json.dumps({{c: sorted(s) for c, s in groups.items()}}))
 
 
 def completed_folds(save_dir, name):
-    """Fold indices that already have a run dir with a finished model_best.pth."""
+    """Fold indices whose run finished, i.e. trained AND wrote its test results.
+
+    model_best.pth alone is not enough: it appears at the first improving epoch,
+    so a fold killed mid-training leaves one behind and would be skipped on
+    resume, silently dropping it from the sweep. test_results.json is only
+    written after the post-training test pass, so it marks genuine completion.
+    """
     done = {}
     models = Path(save_dir) / 'models'
     for cfg_path in sorted(models.glob('*/config.json')):
@@ -65,7 +71,7 @@ def completed_folds(save_dir, name):
         args = cfg.get('data_loader', {}).get('args', {})
         if not args.get('n_folds'):
             continue
-        if (cfg_path.parent / 'model_best.pth').exists():
+        if (cfg_path.parent / 'test_results.json').exists():
             done[args.get('fold', 0)] = cfg_path.parent.name
     return done
 

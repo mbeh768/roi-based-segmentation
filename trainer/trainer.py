@@ -42,6 +42,12 @@ class Trainer(BaseTrainer):
 
         self.aux_loss_weight = config['trainer'].get('aux_loss_weight', 0.0)
         self.channels_last = config['trainer'].get('channels_last', False)
+        self.accum_steps = max(1, int(config['trainer'].get('accum_steps', 1)))
+        if self.accum_steps > 1:
+            self.logger.info('gradient accumulation: %d x batch %d = effective %d',
+                             self.accum_steps, data_loader.batch_size,
+                             self.accum_steps * data_loader.batch_size)
+        self.optimizer.zero_grad()
 
         switch_cfg = config['trainer'].get('loss_switch', None)
         self._switch_cfg  = switch_cfg   # {trigger_metric, threshold, loss} or None
@@ -164,7 +170,8 @@ class Trainer(BaseTrainer):
             inputs = [self._to_device(x) for x in raw_inputs]
             target = target.to(self.device)
 
-            self.optimizer.zero_grad()
+            # NB: no zero_grad() here -- gradients must persist across the
+            # accumulation window. It is called after each optimizer step below.
             # autocast covers forward + loss only; backward runs outside it and
             # inherits the dtypes autocast recorded. bf16 needs no GradScaler.
             with torch.autocast('cuda', dtype=self.amp_dtype, enabled=self.amp):
@@ -180,8 +187,18 @@ class Trainer(BaseTrainer):
                 else:
                     main_loss = None
                     loss = self.criterion(output, target)
-            loss.backward()
-            self.optimizer.step()
+            # Gradient accumulation: run accum_steps micro-batches before
+            # stepping, so an 8GB card reproduces a larger effective batch. This
+            # is exact here, not an approximation -- dice_loss reduces per image
+            # (dims=(1,2,3) then .mean()) and BCE is mean-reduced, so the mean of
+            # accum_steps micro-batch losses equals the loss over the whole batch;
+            # and the model normalises with GroupNorm, which is batch-independent
+            # (BatchNorm would break this).
+            self.scaler.scale(loss / self.accum_steps).backward()
+            if (batch_idx + 1) % self.accum_steps == 0 or (batch_idx + 1) == self.len_epoch:
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad()
 
             self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
