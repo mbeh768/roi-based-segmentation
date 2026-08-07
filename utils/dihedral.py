@@ -81,12 +81,12 @@ def _build_param_map():
     probe = torch.arange(36).reshape(1, 6, 6)
     canon = {}
     for d in range(8):
-        canon[apply_dihedral(probe, d).flatten().tolist()] = d
+        canon[tuple(apply_dihedral(probe, d).flatten().tolist())] = d
     out = {}
     for h in (0, 1):
         for v in (0, 1):
             for k in range(4):
-                key = apply_geo_params(probe, (h, v, k)).flatten().tolist()
+                key = tuple(apply_geo_params(probe, (h, v, k)).flatten().tolist())
                 if key not in canon:
                     raise RuntimeError(f"(h={h},v={v},k={k}) is not a dihedral element")
                 out[(h, v, k)] = canon[key]
