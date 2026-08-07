@@ -253,3 +253,11 @@ class ImageNetPretrainedLocalUNet(BaseModel):
         x = self.dec1(u1)
 
         return self.head(x)
+
+
+# EXPERIMENT 13 lives in its own module so this one stays exactly as 9I had it,
+# but config-driven instantiation resolves arch types by getattr on THIS module.
+# Importing at the bottom (rather than the top) is safe despite neighbour_model
+# importing from here: by this point the classes above are defined, and this
+# module is already in sys.modules, so the cycle resolves.
+from model.neighbour_model import NeighbourContextUNet  # noqa: E402,F401

@@ -24,9 +24,16 @@ from model.model import ImageNetPretrainedLocalUNet, _crop_and_resize
 
 
 class NeighbourContextUNet(ImageNetPretrainedLocalUNet):
-    def __init__(self, *args, n_neighbours=8, neighbour_proj_ch=512, **kwargs):
+    def __init__(self, *args, n_neighbours=8, neighbour_proj_ch=512,
+                 zero_neighbours=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.n_neighbours = n_neighbours
+        # Capacity control. The 1x1 projection adds ~2.6M parameters, so a win
+        # for this architecture would otherwise confound "context helped" with
+        # "a bigger model helped". With zero_neighbours=True the parameter count
+        # and every code path are identical but the neighbours contribute
+        # nothing, so the difference between the two arms is context alone.
+        self.zero_neighbours = zero_neighbours
 
         c5 = self.backbone.feature_info.channels()[-1]
         per_tile = c5 + self.roi_ch                     # one tile's features + its ROI
@@ -57,6 +64,8 @@ class NeighbourContextUNet(ImageNetPretrainedLocalUNet):
             x = torch.cat([x, roi_at(h, w, pos)], dim=1)
 
         if nb_feats is not None:
+            if self.zero_neighbours:
+                nb_valid = torch.zeros_like(nb_valid)
             parts = [x]
             for i in range(nb_feats.shape[1]):
                 f = nb_feats[:, i]
