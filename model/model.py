@@ -261,3 +261,4 @@ class ImageNetPretrainedLocalUNet(BaseModel):
 # importing from here: by this point the classes above are defined, and this
 # module is already in sys.modules, so the cycle resolves.
 from model.neighbour_model import NeighbourContextUNet  # noqa: E402,F401
+from model.rebalanced_model import RebalancedDecoderUNet  # noqa: E402,F401
