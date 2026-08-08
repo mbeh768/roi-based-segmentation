@@ -43,9 +43,17 @@ class NeighbourContextUNet(ImageNetPretrainedLocalUNet):
             nn.GroupNorm(8, neighbour_proj_ch),
             nn.ReLU(inplace=True),
         )
-        # up5 expects c5 + roi_ch; project back to exactly that so the rest of
-        # the decoder is bit-identical to 9I's.
+        # Zero-initialised residual adapter. The fusion ADDS to the centre
+        # features rather than replacing them, and starts at exactly zero, so at
+        # initialisation this model IS 9I -- the decoder receives the identical
+        # bottleneck and the context branch contributes nothing until it learns
+        # to. Replacing the centre instead (the first version of this) handed the
+        # decoder a randomly-projected signal with cosine similarity 0.056 to the
+        # centre tile, so the model had to relearn a pathway the champion gets
+        # for free, and the resulting deficit had nothing to do with context.
         self.neighbour_out = nn.Conv2d(neighbour_proj_ch, per_tile, kernel_size=1)
+        nn.init.zeros_(self.neighbour_out.weight)
+        nn.init.zeros_(self.neighbour_out.bias)
         self.fused_in = fused_in
 
     def forward(self, local, glob, pos, roi=None,
@@ -79,7 +87,8 @@ class NeighbourContextUNet(ImageNetPretrainedLocalUNet):
             fused = torch.cat(parts, dim=1)
             assert fused.shape[1] == self.fused_in, (
                 f"bottleneck got {fused.shape[1]}ch, expected {self.fused_in}")
-            x = self.neighbour_out(self.neighbour_proj(fused))
+            # residual: the centre reaches up5 unchanged, context is added on top
+            x = x + self.neighbour_out(self.neighbour_proj(fused))
 
         def fuse(up, skip):
             parts = [up, skip]
