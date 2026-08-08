@@ -1044,4 +1044,32 @@ only bottleneck concatenations and the first decoder convolution are affected
     information is not in the tile. So expect a small positive delta at best, against a
     fold-to-fold noise floor of ~0.0036. Islands are already stripped post hoc in deployment,
     so the realistic headroom is the holes, ~+0.006.
-    Results:
+    Results: STOPPED at 4/14 folds, judged not worth the compute. Deltas vs champion on the
+    folds completed: -0.0114, +0.0023, -0.0013 (fold 3 incomplete), mean -0.0035 at n=3 --
+    i.e. AT the fold-to-fold noise floor of 0.0036, not below it. Two of three folds sit within
+    +/-0.002 of the champion. Read as "indistinguishable", not "worse".
+    The decision does not rest on those numbers. [EXPERIMENT 11A] fixed the ceiling BEFORE this
+    ran: all topology-related error is worth at most +0.013 slide IoU, islands are already
+    stripped post hoc in deployment, so the realistic headroom was ~+0.006 against a +/-0.0036
+    noise floor -- not resolvable at n=14 even if real. Against that, this architecture costs a
+    40GB feature cache, an 8-orientation dihedral cache, three silent-failure contracts
+    (orientation mapping, slot permutation, per-neighbour pos) and a bespoke fusion layer. The
+    maintenance surface alone outweighs the available gain, so it would not have been adopted
+    on a win either. The CONTROL arm never ran; the capacity question is therefore unanswered,
+    which does not matter given the arm it was controlling is not being adopted.
+    STRUCTURAL LIMITATION worth recording for anyone revisiting this: neighbour context enters
+    ONLY at the 16x16 bottleneck. The skips (s1-s4) remain centre-tile-only, so context can
+    shape coarse decisions but can never inform a boundary at full resolution -- and 11A
+    measured 41.2% of residual error AS boundary imprecision. Enlarging the input instead
+    (preprocess context_size, already supported and unused: images are saved at context_size
+    while masks stay at tile_size, and _crop_to_target trims the output back) widens what the
+    encoder sees AND carries it up through every skip at full spatial detail, while keeping the
+    tile count and therefore the sample count unchanged. That is the better-posed version of
+    this idea and it remains untested.
+    NOTE on the residual fix: it did NOT change the answer. Fold 0 gave 0.9041 before the fix
+    and 0.9042 after -- backprop had recovered from the bad initialisation on its own, as
+    predicted in conversation. What it changed was convergence speed (best epoch 124 -> 66) and,
+    more importantly, interpretability: with the zero-init residual the model provably starts AT
+    the champion, so this null means the context carries nothing usable rather than that the
+    model spent its budget climbing back to par. Worth keeping in mind that a large difference
+    at initialisation does not imply a large difference after training.
