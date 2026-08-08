@@ -17,7 +17,7 @@ echo "[$(date '+%F %T')] START $arm"
     --base-dir "$BASE" --repo "$REPO" \
     --config "$REPO/EXPERIMENT14/EXPERIMENT_14.json" \
     --data-dir "data/[collapsed]t8192_ctx512_inner512_old" \
-    --name "$arm" \
+    --name "$arm" --folds 0,1,2,3,4,5,6 \
     --log-dir "$LOG/folds" >> "$LOG/$arm.log" 2>&1
 echo "[$(date '+%F %T')] DONE $arm rc=$? ($(ls $BASE/saved/models/${arm}*/test_results.json 2>/dev/null | wc -l)/14 folds)"
 echo "[$(date '+%F %T')] EXP14_COMPLETE"
