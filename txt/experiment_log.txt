@@ -1073,3 +1073,48 @@ only bottleneck concatenations and the first decoder convolution are affected
     the champion, so this null means the context carries nothing usable rather than that the
     model spent its budget climbing back to par. Worth keeping in mind that a large difference
     at initialisation does not imply a large difference after training.
+
+
+[EXPERIMENT 14] - decoder capacity rebalanced toward high resolution
+motivation: the question [EXPERIMENT 12] did NOT answer. 12 showed there is no shortage of
+decoder capacity (5G reached within 0.0096 of champion on 18% of the parameters). It did not
+ask whether the capacity is in the wrong PLACE. The champion decoder tapers 256,128,64,64,64
+as resolution doubles, which puts 71% of trainable parameters in up5+dec5 at 32x32 and 6.7% at
+256^2+512^2 -- where boundary decisions are made. [EXPERIMENT 11A] measured 41.2% of held-out
+error as boundary imprecision, the largest single bucket and 3x the island error the topology
+work chased.
+    arch: RebalancedDecoderUNet (model/rebalanced_model.py, separate module so the champion
+    class is untouched; forward() inherited verbatim since the parent already routes through
+    skip4..skip1, and skips are 1x1-projected where encoder channels do not match the level
+    width). decoder_widths 96,96,128,192,192 vs the champion's 256,128,64,64,64.
+    PARAMETER-MATCHED BY DESIGN: 3,189,249 vs 3,231,617 = 98.7%, so a difference cannot be read
+    as capacity in either direction, while the share of parameters operating at 256^2+512^2
+    goes 6.7% -> 59.8%. Nearly identical budget, nearly inverted placement.
+    cost note: parameter-matched is NOT memory- or compute-matched. Moving capacity to high
+    resolution is precisely the change that inflates the largest activations (dec1 64ch ->
+    192ch at 512^2), so batch 40 OOMs and so does 20. Ran at micro-batch 10 with accum_steps 4,
+    keeping the effective batch at 40 and therefore the gradient bit-identical to the champion.
+    Also 78s/epoch vs the champion's 22s, and it converged far later (best epoch 350 vs 110),
+    so a fold cost ~8h against the champion's ~1.5h.
+    run: bash EXPERIMENT14/run.sh    (7-fold screen, folds 0-6)
+    Expected: a win says boundary error is a capacity-PLACEMENT problem; a null says it is not,
+    most likely annotation precision, which no architecture recovers.
+    Results: STOPPED after fold 0. Test IoU 0.9106 vs champion 0.9156, delta -0.0050 (~1.4x the
+    0.0036 noise floor, so not decisive alone, but not encouraging).
+    The instructive part is the val/test relationship, given generalisability is a selling point
+    of this model:
+        champion  best_ep 110  val_loss 0.1405  val_iou 0.9558  TEST 0.9156  gap -0.0402
+        EXP14     best_ep 350  val_loss 0.1356  val_iou 0.9560  TEST 0.9106  gap -0.0454
+    Validation was equal or BETTER on both metrics (val_loss lower, val_iou +0.0002) and the
+    held-out number still came in lower -- a clean demonstration of why val is not reportable
+    here. The val-to-test gap WIDENED, which is the expected cost of training 3x longer: 350
+    epochs of selecting a checkpoint against 3 validation cases gives more opportunity to fit
+    them than 110 does.
+    Precedent worth noting: 5G in [EXPERIMENT 12] also converged unusually late (328 epochs vs
+    110) and also finished below champion. Late convergence in this pipeline has now twice
+    accompanied a worse held-out result rather than a better one.
+    CONCLUSION: capacity placement is not the lever either. Combined with [EXPERIMENT 12]
+    (capacity amount) and [EXPERIMENT 13] (bottleneck context), the decoder is not where the
+    remaining error lives. 11A's decomposition stands as the best guide: 41% boundary
+    imprecision, which is most plausibly annotation precision and a resolution ceiling rather
+    than anything architectural.
