@@ -968,3 +968,80 @@ NOTE:
 the overall effect of this is we now have many more channel dims at identical spatial dims at the bottleneck
 skip connections are preserved as is the rest of the model. the only thing that changes are the channel reductions in the decoder which should be made more agressive only in the convolution immediatley following the bottleneck
 only bottleneck concatenations and the first decoder convolution are affected
+    implementation as built (decisions taken where the spec left room):
+    neighbours    +/-2 grid indices, i.e. 512px offsets, so the 3x3 block is contiguous and
+                  non-overlapping (1536x1536 of context). Adjacent tiles at stride 256 would
+                  overlap the centre 50%, so half of what each neighbour carried would already
+                  be inside the centre tile.
+    reduction     Conv2d(4617 -> 512, 1x1) -> GroupNorm -> ReLU -> Conv2d(512 -> 513, 1x1),
+                  then up5 unchanged at (513 -> 256). Letting up5 absorb 4617 inputs directly
+                  would cost 4.7M params, more than the whole champion model.
+    caching       extract_all.py caches s5 for all 8 dihedral orientations (40GB, on gpu-box).
+                  Valid because the local encoder is frozen AND the pipeline applies no
+                  photometric augmentation (photo_transform is None and nothing assigns it),
+                  so a tile's pixels are deterministic up to the geometric augs, which ARE the
+                  dihedral group. Verified exact against a live backbone pass (0.0 difference
+                  at matching batch size; the 1.5e-2 seen at mismatched batch sizes is cuDNN
+                  picking different conv algorithms, not a caching artifact).
+    edges         missing neighbours contribute zeroed features AND a zeroed ROI crop (1.1%
+                  of slots).
+    ROI-excluded  the neighbour index is built from the full coordinates.json, NOT from the
+      tiles       post-exclusion item list. roi_exclusion decides what gets PREDICTED; an
+                  excluded tile is still valid CONTEXT. Measured: 7,987 of 31,637 resolved
+                  neighbour slots (25.2%) are tiles excluded from prediction. Had the index
+                  been built from the item list these would have silently zero-filled and the
+                  experiment would have tested something much weaker.
+
+    the three silent-failure contracts (utils/dihedral.py, all derived and self-tested):
+      1. the cached orientation read must be the dihedral element that the augmenter's
+         (hflip, vflip, rot90) actually composes to. The pipeline samples those three
+         independently -- 16 combinations over the group's 8 elements -- and 13 must keep that
+         exact distribution to stay comparable to 9I, so the drawn params are MAPPED to a cache
+         index rather than resampled from the group.
+      2. the 9 slots must permute with the same element: rotating the grid moves a tile's west
+         neighbour to the south.
+      3. every neighbour carries its OWN pos. Reusing the centre's would hand all 9 slots the
+         same ROI crop.
+      Each fails silently -- the model would train to a plausible-looking wrong number rather
+      than raise -- so none is hand-written.
+
+    CONTROL ARM: EXPERIMENT_13_CONTROL sets zero_neighbours=True, forcing nb_valid to zero.
+    Identical parameter count, identical code path, no context. The 1x1 projection adds ~2.6M
+    params over the champion (5.86M vs 3.23M), so without this a win would confound "context
+    helped" with "a bigger model helped" -- and [EXPERIMENT 12] established that decoder
+    capacity is NOT the binding constraint, which makes that the first question a reader asks.
+    13 vs CONTROL isolates context with capacity held exactly fixed.
+
+    FIRST ATTEMPT WAS INVALID -- fusion replaced the centre instead of adding to it.
+    The first build did  x = neighbour_out(neighbour_proj(fused)), discarding the centre tile's
+    own bottleneck rather than augmenting it. The decoder therefore received a randomly
+    projected mixture instead of the centre features: measured with neighbours zeroed, cosine
+    similarity to what the champion's decoder receives was 0.056. The model opened training by
+    relearning a pathway 9I gets for free.
+    Note this is NOT the same as "the decoder is randomly initialised anyway". The random
+    decoder is COMMON to 9I and 13, so it is not a difference between them. The random fusion
+    layer existed only in 13, so it was a second difference alongside context -- and with 9
+    tiles concatenated the centre contributed roughly 1/9 of the input variance, so the centre
+    signal was also diluted 9x relative to what up5 normally sees.
+    Symptom: folds 0 and 1 came in at 0.9041 and 0.9683 vs the champion's 0.9156 and 0.9701,
+    mean delta -0.0066 -- consistently below, and attributable to the initialisation rather
+    than to context. Both arms carried the flaw equally, so 13-vs-CONTROL would still have been
+    a fair test of context; 13-vs-champion, the comparison the paper needs, would not have been.
+    FIX: neighbour_out is zero-initialised and the branch is a residual,
+    x = x + neighbour_out(neighbour_proj(fused)). At init the context contributes exactly
+    nothing and the decoder receives the identical bottleneck, so the architecture STARTS at
+    the champion and can only depart from it by learning to use neighbours. Verified
+    bit-identical to the champion at init (0.000e+00 max abs difference on the output) even
+    with real neighbour features present. The hypothesis class now strictly contains 9I and is
+    initialised at it, so a null result means the context genuinely carries nothing, rather
+    than that the model spent its budget recovering from a bad starting point.
+    Run discarded and relaunched 2026-08-07 22:18 after 3 folds.
+
+    run: bash EXPERIMENT13/run_both.sh          (both arms, 14 folds, on gpu-box)
+    Expected: [EXPERIMENT 11A] measured a hard ceiling of ~+0.013 slide IoU for ALL
+    topology-related error (islands + holes), and neighbour context should mainly attack
+    exactly that -- a tile containing only a speck cannot know it is spurious, because the
+    information is not in the tile. So expect a small positive delta at best, against a
+    fold-to-fold noise floor of ~0.0036. Islands are already stripped post hoc in deployment,
+    so the realistic headroom is the holes, ~+0.006.
+    Results:
