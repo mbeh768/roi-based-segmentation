@@ -59,7 +59,7 @@ def main():
     strengths = [float(s) for s in a.strengths.split(',')]
 
     g = glob_img.numpy()
-    g = (g - g.min()) / (g.ptp() + 1e-9)
+    g = (g - g.min()) / (np.ptp(g) + 1e-9)   # ndarray.ptp removed in NumPy 2.0
 
     fig, axes = plt.subplots(a.seeds, len(strengths),
                              figsize=(2.5 * len(strengths), 2.6 * a.seeds))
