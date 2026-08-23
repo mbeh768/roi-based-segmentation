@@ -33,21 +33,32 @@ def roi_iou(a, b):
 
 
 def boundary_shift(a, b):
-    """Mean distance from perturbed boundary pixels to the original boundary."""
+    """Symmetric mean surface distance, in ROI pixels.
+
+    Measured both directions and averaged: a one-sided version only sees
+    displacement that moves the boundary OUTWARD, and reads ~0 for a boundary
+    that moved inward. For a thin branching structure like this ROI, IoU
+    collapses under sub-pixel shifts because perimeter-to-area is huge, so
+    surface distance is the more honest axis.
+    """
     from scipy import ndimage
     a = (a > 0.5).numpy(); b = (b > 0.5).numpy()
     if not a.any() or not b.any():
         return float('nan')
-    da = ndimage.distance_transform_edt(~a)
+    ea = a ^ ndimage.binary_erosion(a)
     eb = b ^ ndimage.binary_erosion(b)
-    return float(da[eb].mean()) if eb.any() else float('nan')
+    if not ea.any() or not eb.any():
+        return float('nan')
+    d_ab = ndimage.distance_transform_edt(~ea)[eb].mean()
+    d_ba = ndimage.distance_transform_edt(~eb)[ea].mean()
+    return float((d_ab + d_ba) / 2)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--data-dir', required=True)
     ap.add_argument('--stem', default=None)
-    ap.add_argument('--strengths', default='0.0,0.05,0.1,0.2,0.3,0.5')
+    ap.add_argument('--strengths', default='0.0,0.01,0.02,0.035,0.05,0.08')
     ap.add_argument('--seeds', type=int, default=3, help='draws per strength')
     ap.add_argument('--out', default='roi_perturbation_preview.png')
     a = ap.parse_args()
@@ -89,9 +100,11 @@ def main():
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     fig.savefig(a.out, dpi=130)
     print(f"wrote {a.out}\n")
-    print("%9s %12s %10s %16s" % ("strength", "ROI IoU", "sd", "boundary shift px"))
+    print("%9s %12s %8s %14s %16s" % ("strength", "ROI IoU", "sd",
+          "surf dist px", "at slide scale"))
     for s, (m, sd, sh) in stats.items():
-        print("%9.2f %12.4f %10.4f %16.1f" % (s, m, sd, sh))
+        # ROI/global is 256 across a tiling space of 8192 -> 32x
+        print("%9.3f %12.4f %8.4f %14.2f %13.0f px" % (s, m, sd, sh, sh * 32))
     json.dump({str(k): v for k, v in stats.items()},
               open(Path(a.out).with_suffix('.json'), 'w'), indent=2)
 
