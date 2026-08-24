@@ -1118,3 +1118,85 @@ work chased.
     remaining error lives. 11A's decomposition stands as the best guide: 41% boundary
     imprecision, which is most plausibly annotation precision and a resolution ceiling rather
     than anything architectural.
+
+
+[EXPERIMENT 15] - robustness to annotator variation (ROI perturbation sweep)
+paper figure. Does the segmentation hold up when a different annotator supplies the ROI?
+Inference-only on [EXPERIMENT 11]'s existing checkpoints -- no retraining.
+
+    THE METRIC: slide-level IoU vs ground truth of the final segmentation, the same
+    measure [EXPERIMENT 11] reports. That is the number the figure exists to show, and it is
+    what makes the claim "the output does not change". Perturbation magnitude is reported
+    only to label the x-axis; it is not the result.
+    At strength 0 this must reproduce 0.9243 exactly -- a built-in correctness check on the
+    whole pipeline. If it does not, the sweep is wrong before any conclusion is drawn.
+
+    - ROI SOURCE: roi_<stem>.pt, the on-file annotation with NO suffix. NEVER derive an ROI
+      from the ground-truth mask -- the ROI is a user-supplied prior consumed at inference, so
+      building it from GT leaks the label into the model's input and invalidates every score.
+      The _1/_2 variants are held back for the real-annotator anchor below.
+    - mechanic: _roi_grid_distort (data_loader/datasets.py), a random grid warp. NOT
+      roi_jitter, which replaces the ROI with all-ones and so ablates the constraint rather
+      than varying it -- the failure 5C ran into ("learns to ignore rois").
+    - 5 FIXED ANNOTATOR PRESETS, not random draws. Each preset is a fixed seed, so the warp
+      field is identical across folds and across strengths and only its magnitude scales
+      (_roi_grid_distort multiplies its control points by strength, so one seed gives one
+      consistent "annotator bias" that grows with strength). This makes every strength a
+      PAIRED comparison against the same five annotators rather than a fresh sample, which
+      removes draw-to-draw variance from the trend and makes the figure reproducible.
+    - strengths 0, 0.005, 0.01, 0.02, 0.04, 0.08.
+    - perturbation applied at INFERENCE only. Training is untouched, so this measures the
+      deployed model's tolerance, not a model trained to be tolerant.
+    - 14 folds x 5 presets x 6 strengths = 420 fold-evaluations.
+    - secondary, x-axis labelling only: ROI IoU and symmetric mean surface distance between
+      the perturbed and original ROI. Report surface distance in preference to ROI IoU: this
+      ROI is a thin branching structure with a huge perimeter-to-area ratio, so its IoU
+      collapses under sub-pixel shifts (strength 0.005 is ~10 slide px of boundary movement
+      but reads ROI IoU 0.917), and quoting ROI IoU invites comparison against the 0.85-0.95
+      inter-observer figures published for COMPACT organs. Surface distance must be measured
+      symmetrically; a one-sided version reads ~0 for a boundary that moved inward.
+      ROI/global is 256 px across an 8192 tiling space, so ROI px x32 = slide px.
+    - preview of the mechanic across the full range: utils/roi_range_figure.py
+    - pilot (fold 0, 5 annotators at strength 0.02): predictions agreed with each other at
+      IoU 0.923 while their ROIs agreed at only 0.684, and accuracy vs GT held at
+      0.881 +/- 0.021. Cropped-region numbers, not comparable to the LOCO table, but the
+      tight accuracy spread under a wide input spread is the effect this sweep should show
+      at full scale.
+    - REAL-ANNOTATOR ANCHOR (worth adding): each slide carries 3 genuinely annotated ROI
+      variants (roi_<stem>.pt, _1, _2). Scoring the model across those three is a MEASURED
+      inter-annotator result needing no simulation, and is the stronger form of this claim.
+      The synthetic sweep then only has to show the trend continues past what the three real
+      variants span.
+    Expected: IoU vs GT roughly flat across the plausible range, with any knee well beyond
+    realistic annotator disagreement. A flat line here is the result, not a null.
+    Results: 364 evaluations, pure inference on EXPERIMENT 11's checkpoints.
+        displacement    IoU vs GT      sd     vs baseline
+           0 px         0.9237       0.071      --
+          10 px         0.9193       0.072    -0.0044
+          22 px         0.9072       0.075    -0.0165
+          39 px         0.8642       0.095    -0.0595
+          70 px         0.7637       0.137    -0.1600
+         125 px         0.6122       0.175    -0.3115
+    Degradation is graceful, not a cliff, and the model tolerates small perturbations well:
+    10 px of boundary movement costs 0.0044 IoU, inside the fold-to-fold noise. It is NOT
+    flat, though -- by 22 px it is down 0.017 and it falls steadily thereafter.
+    sd grows with perturbation (0.071 -> 0.175): the model does not merely lose accuracy, it
+    becomes less predictable, with some folds tolerating far more than others. Plot the band.
+    HARNESS: verified by replicating EXPERIMENT 11's own ROI protocol, max |diff| 3.10e-05.
+    The pinned-ROI baseline (0.9237) is NOT 11's 0.9243 and should not be: datasets.py picks
+    random.choice(stem_to_roi[stem]) per tile, and that glob covers roi_<stem>.pt, _1 and _2,
+    so 11's headline ALREADY averages over the three real annotated variants. Pinning one
+    reference annotator shifts it by 0.0034 mean / 0.0176 max.
+    *** DO NOT read the real-annotator effect off this curve. *** The three genuinely
+    annotated variants differ by a median of 40 slide px (10-90%: 23-59 px), and the curve at
+    39 px reads 0.864, i.e. -0.060. But swapping real variants was measured at only -0.0034.
+    A ~17x discrepancy at matched displacement, because the two disagreements have different
+    STRUCTURE: a grid warp pushes the ROI off the anatomy, whereas a second annotator still
+    traces it. Displacement magnitude alone does not predict damage. The synthetic sweep is
+    therefore a CONSERVATIVE UPPER BOUND on what annotator variation costs, which is the
+    honest way to present it and is stronger than claiming the curve applies directly.
+    STILL TO RUN: pin each of the three real variants in turn (utils/roi_robustness_sweep.py
+    --real-variants, implemented, 14 folds x 3 = 42 evaluations) to place a measured
+    real-annotator POINT on the same axes. Blocked only on gpu-box being reachable.
+    figure: figures-for-pub/fig6_roi_robustness.png (utils/roi_robustness_figure.py)
+    data:   kfold_results/roi_robustness.json
