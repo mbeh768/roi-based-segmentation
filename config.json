@@ -1,5 +1,5 @@
 {
-    "name": "EXPERIMENT 10A_old [wholistic performance evaluation]",
+    "name": "k-fold-baseline",
     "n_gpu": 1,
     "arch": {
         "type": "ImageNetPretrainedLocalUNet",
@@ -18,7 +18,7 @@
     "data_loader": {
         "type": "LocalGlobalDataLoader",
         "args": {
-            "data_dir": "data/[collapsed]t8192_ctx512_inner512_old",
+            "data_dir": "data/tilingsize8192_tilesize512",
             "batch_size": 40,
             "shuffle": true,
             "validation_split": 0.3,
