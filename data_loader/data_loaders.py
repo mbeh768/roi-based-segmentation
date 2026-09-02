@@ -55,7 +55,23 @@ class LocalGlobalDataLoader(BaseDataLoader):
     def _split_sampler(self, split):
         """Case-grouped split. Overrides BaseDataLoader's index-level shuffle,
         which would put tiles from one slide -- and paired slide halves -- on
-        both sides of the split."""
+        both sides of the split.
+
+        TWO SEPARATE MODES, and validation_split only drives one of them:
+
+          n_folds < 2   validation_split sets the validation size, as a
+                        fraction of CASES (not tiles) or an integer count.
+
+          n_folds >= 2  k-fold. validation_split is IGNORED apart from having
+                        to be non-zero. Each fold holds out one chunk of cases
+                        as test and carves n_val_cases further cases out of the
+                        remainder for validation, rotating that window by fold.
+                        So `validation_split: 0.3` in a k-fold config does NOT
+                        mean 30% validation: with 14 cases and n_val_cases=3 the
+                        validation share of the train+val pool measures 13.8% to
+                        37.0% by tile count (mean 22.3%), because case sizes
+                        range from 37 to 554 tiles.
+        """
         if split == 0.0:
             return None, None
 
@@ -66,65 +82,61 @@ class LocalGlobalDataLoader(BaseDataLoader):
         for idx, (_, stem, _) in enumerate(self.dataset.items):
             case_to_indices[case_id(stem)].append(idx)
 
-        if split == 0.0:
-            train_idx = list(range(len(self.dataset)))
-            val_sampler = None
-        else:
-            cases = list(case_to_indices.keys())
-            # split_seed controls which cases land in validation. Vary it across
-            # runs to check the reported metric isn't an artifact of one lucky split.
-            np.random.RandomState(self.split_seed).shuffle(cases)
-            if self.n_folds and self.n_folds >= 2:
-                # k-fold: partition the (seed-shuffled) cases into n_folds chunks and
-                # hold out chunk `fold` as the TEST set. Keep split_seed FIXED across
-                # the k runs and vary only `fold` (0..n_folds-1) so each case is tested
-                # exactly once and weight init stays constant — isolating the split
-                # effect. validation_split is ignored in fold mode.
-                # n_folds == len(cases) gives leave-one-case-out (the smallest possible
-                # test set per fold); n_folds > len(cases) would leave some folds
-                # empty, so it's rejected rather than silently under-filled.
-                if self.n_folds > len(cases):
-                    raise ValueError(
-                        f"n_folds={self.n_folds} exceeds the number of cases "
-                        f"({len(cases)}) after pair-grouping -- can't leave one "
-                        f"case out per fold.")
-                chunks = [list(c) for c in np.array_split(np.array(cases, dtype=object), self.n_folds)]
-                f = self.fold % self.n_folds
-                test_cases = chunks[f]
+        cases = list(case_to_indices.keys())
+        # split_seed controls which cases land in validation. Vary it across
+        # runs to check the reported metric isn't an artifact of one lucky split.
+        np.random.RandomState(self.split_seed).shuffle(cases)
+        if self.n_folds and self.n_folds >= 2:
+            # k-fold: partition the (seed-shuffled) cases into n_folds chunks and
+            # hold out chunk `fold` as the TEST set. Keep split_seed FIXED across
+            # the k runs and vary only `fold` (0..n_folds-1) so each case is tested
+            # exactly once and weight init stays constant — isolating the split
+            # effect. validation_split is ignored in fold mode.
+            # n_folds == len(cases) gives leave-one-case-out (the smallest possible
+            # test set per fold); n_folds > len(cases) would leave some folds
+            # empty, so it's rejected rather than silently under-filled.
+            if self.n_folds > len(cases):
+                raise ValueError(
+                    f"n_folds={self.n_folds} exceeds the number of cases "
+                    f"({len(cases)}) after pair-grouping -- can't leave one "
+                    f"case out per fold.")
+            chunks = [list(c) for c in np.array_split(np.array(cases, dtype=object), self.n_folds)]
+            f = self.fold % self.n_folds
+            test_cases = chunks[f]
 
-                # Carve the validation set out of the REMAINING cases, never out of
-                # the test case: early stopping and best-checkpoint selection read
-                # val_loss, so anything in val has effectively been seen by model
-                # selection and can no longer serve as a held-out estimate. With
-                # n_val_cases=0 this degenerates to the old two-way split, where the
-                # reported metric is optimistically biased by that selection.
-                rest = [c for c in cases if c not in set(test_cases)]
-                k = min(self.n_val_cases, max(len(rest) - 1, 0))
-                if self.n_val_cases and k < self.n_val_cases:
-                    raise ValueError(
-                        f"n_val_cases={self.n_val_cases} leaves no training cases "
-                        f"(only {len(rest)} non-test cases available)")
-                # Rotate the val window with the fold so the same slides aren't
-                # always the ones spent on model selection.
-                if k > 0:
-                    start = (self.fold * k) % len(rest)
-                    val_cases = [rest[(start + i) % len(rest)] for i in range(k)]
-                else:
-                    val_cases = list(test_cases)      # legacy two-way behaviour
-                val_set = set(val_cases)
-                train_cases = [c for c in rest if c not in val_set]
-
-                self.test_indices = [i for c in test_cases for i in case_to_indices[c]]
-                self.split_cases = {'train': list(train_cases),
-                                    'val': list(val_cases),
-                                    'test': list(test_cases)}
+            # Carve the validation set out of the REMAINING cases, never out of
+            # the test case: early stopping and best-checkpoint selection read
+            # val_loss, so anything in val has effectively been seen by model
+            # selection and can no longer serve as a held-out estimate. With
+            # n_val_cases=0 this degenerates to the old two-way split, where the
+            # reported metric is optimistically biased by that selection.
+            rest = [c for c in cases if c not in set(test_cases)]
+            k = min(self.n_val_cases, max(len(rest) - 1, 0))
+            if self.n_val_cases and k < self.n_val_cases:
+                raise ValueError(
+                    f"n_val_cases={self.n_val_cases} leaves no training cases "
+                    f"(only {len(rest)} non-test cases available)")
+            # Rotate the val window with the fold so the same slides aren't
+            # always the ones spent on model selection.
+            if k > 0:
+                start = (self.fold * k) % len(rest)
+                val_cases = [rest[(start + i) % len(rest)] for i in range(k)]
             else:
-                n_val = split if isinstance(split, int) else max(1, int(len(cases) * split))
-                val_cases   = cases[:n_val]
-                train_cases = cases[n_val:]
-            train_idx = [i for c in train_cases for i in case_to_indices[c]]
-            val_idx   = [i for c in val_cases   for i in case_to_indices[c]]
-            val_sampler = SubsetRandomSampler(val_idx)
+                val_cases = list(test_cases)      # legacy two-way behaviour
+            val_set = set(val_cases)
+            train_cases = [c for c in rest if c not in val_set]
+
+            self.test_indices = [i for c in test_cases for i in case_to_indices[c]]
+            self.split_cases = {'train': list(train_cases),
+                                'val': list(val_cases),
+                                'test': list(test_cases)}
+        else:
+            n_val = split if isinstance(split, int) else max(1, int(len(cases) * split))
+            val_cases   = cases[:n_val]
+            train_cases = cases[n_val:]
+        train_idx = [i for c in train_cases for i in case_to_indices[c]]
+        val_idx   = [i for c in val_cases   for i in case_to_indices[c]]
+        val_sampler = SubsetRandomSampler(val_idx)
 
         train_sampler = SubsetRandomSampler(train_idx)
         self.n_samples = len(train_idx)
