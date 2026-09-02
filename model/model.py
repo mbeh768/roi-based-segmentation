@@ -192,9 +192,8 @@ class ImageNetPretrainedLocalUNet(BaseModel):
 
         self.head = nn.Conv2d(head_in, num_classes, kernel_size=1)
 
-    def forward(self, local, glob, pos, roi=None):
-        # glob is accepted for signature compatibility with LocalGlobalDataLoader batches
-        # but not used; same for pos when use_roi=False.
+    def forward(self, local, pos, roi=None):
+        # pos is unused when use_roi=False: it exists to locate the ROI crop.
         s1, s2, s3, s4, x = self.backbone(local)
 
         inject_skips = self.use_roi and self.roi_inject == 'skips'

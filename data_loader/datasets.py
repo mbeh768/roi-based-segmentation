@@ -139,18 +139,23 @@ class LocalDataset(Dataset):
 
 class LocalGlobalDataset(Dataset):
     """
-    Loads local patch + corresponding global image + mask.
+    Loads a local patch tile + its mask, with the tile's position on the slide.
 
     Index is built by reading coordinates.json files written by preprocess.py.
     All files for a given image live together in data_dir/<subdir>/<stem>/:
-        global.pt            — (C, H, W) float32  downsampled whole-slide
         patch_YYYY_XXXX.pt   — (C, H, W) float32  local tile
         coordinates.json     — patch index with stem, x, y, image_W, image_H
 
-    Returns (local, glob, pos, mask) where pos = [y0, x0, y1, x1] normalised.
+    Returns (local, pos, mask) where pos = [y0, x0, y1, x1] normalised.
     If require_roi=True, also loads a per-stem ROI mask written by
-    annotate_globals.py (roi_<stem>.pt, shape (1, H, W)) and returns it alongside
-    the other tensors.
+    annotate_globals.py (roi_<stem>.pt, shape (1, H, W)) and returns it as
+    (local, pos, roi, mask).
+
+    The whole-slide global.pt is NOT read here. It was passed to the model as
+    `glob` for a global-context branch that no longer exists, and its mask
+    counterpart was the auxiliary head's target; both were loaded per tile and
+    discarded. global.pt is still written by preprocess.py and still read
+    directly from disk by annotate_globals.py and the trainer's split previews.
     """
     def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0,
                  require_roi=False, roi_jitter=0.0,
@@ -249,7 +254,6 @@ class LocalGlobalDataset(Dataset):
         patch_path, stem, entry = self.items[idx]
 
         local = torch.load(patch_path, weights_only=True)
-        glob  = torch.load(self.image_dir / stem / 'global.pt', weights_only=True)
 
         H, W = entry['image_H'], entry['image_W']
         y, x = entry['y'], entry['x']
@@ -269,11 +273,6 @@ class LocalGlobalDataset(Dataset):
         else:
             mask = torch.zeros(1, local.shape[-2], local.shape[-1])
 
-        global_mask_path = self.mask_dir / stem / 'global.pt'
-        if not global_mask_path.exists():
-            raise FileNotFoundError(f"Global mask not found: {global_mask_path}")
-        global_mask = torch.load(global_mask_path, weights_only=True)
-
         roi = None
         if self.require_roi:
             roi = torch.load(random.choice(self.stem_to_roi[stem]), weights_only=True)
@@ -286,19 +285,19 @@ class LocalGlobalDataset(Dataset):
 
         if self.augment:
             if roi is not None:
-                local, glob, roi, mask, global_mask, pos = _geo_augment(
-                    local, glob, roi, mask, global_mask, pos=pos, flags=self.aug_flags,
+                local, roi, mask, pos = _geo_augment(
+                    local, roi, mask, pos=pos, flags=self.aug_flags,
                 )
             else:
-                local, glob, mask, global_mask, pos = _geo_augment(
-                    local, glob, mask, global_mask, pos=pos, flags=self.aug_flags,
+                local, mask, pos = _geo_augment(
+                    local, mask, pos=pos, flags=self.aug_flags,
                 )
         if self.photo_transform is not None:
             local = self.photo_transform(local)
 
         if roi is not None:
-            return local, glob, pos, roi, mask, global_mask
-        return local, glob, pos, mask, global_mask
+            return local, pos, roi, mask
+        return local, pos, mask
 
     def foreground_indices(self, min_ratio=0.05):
         """Partition tile indices into (fg, bg) by mask foreground fraction."""
@@ -318,82 +317,4 @@ class LocalGlobalDataset(Dataset):
               f"{len(fg)}/{total} ({100*len(fg)/total:.1f}%)")
         return fg, bg
 
-    def save_visualizations(self, out_dir, n_samples=20):
-        """Save before/after augmentation side-by-side previews with pos marked."""
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        prev_augment = self.augment
-        self.augment = False
-
-        def _tensor_to_bgr(t):
-            t = t.detach().cpu().float()
-            lo, hi = t.min(), t.max()
-            t = (t - lo) / (hi - lo + 1e-8)
-            arr = (t.numpy() * 255).astype(np.uint8)
-            if arr.ndim == 3:
-                if arr.shape[0] == 1:
-                    arr = np.repeat(arr, 3, axis=0)
-                arr = arr.transpose(1, 2, 0)  # CHW -> HWC
-                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
-            return arr
-
-        def _draw_pos(img, pos):
-            H, W = img.shape[:2]
-            y0, x0, y1, x1 = pos.tolist()
-            p1 = (int(x0 * W), int(y0 * H))
-            p2 = (int(x1 * W), int(y1 * H))
-            return cv2.rectangle(img.copy(), p1, p2, (0, 255, 0), 2)
-
-        def _unpack(sample):
-            """Return (local, glob, pos, roi, mask, gmask) regardless of whether
-            ROIs are enabled (roi is None when not)."""
-            if len(sample) == 6:
-                local, glob, pos, roi, mask, gmask = sample
-                return local, glob, pos, roi, mask, gmask
-            local, glob, pos, mask, gmask = sample
-            return local, glob, pos, None, mask, gmask
-
-        n = min(n_samples, len(self.items))
-        idxs = random.sample(range(len(self.items)), n)
-        for i in idxs:
-            # before
-            before = _unpack(self[i])
-            # after
-            self.augment = True
-            after = _unpack(self[i])
-            self.augment = False
-
-            border_px = 4
-            border_color = (0, 255, 0)
-            rows = []
-            for (local, glob, pos, roi, mask, gmask), label in [
-                (before, 'before'),
-                (after,  'after'),
-            ]:
-                g = _draw_pos(_tensor_to_bgr(glob),  pos)
-                gm = _draw_pos(_tensor_to_bgr(gmask), pos)
-                l = _tensor_to_bgr(local)
-                m = _tensor_to_bgr(mask)
-                # resize local/mask to match global height
-                gh = g.shape[0]
-                l = cv2.resize(l, (gh, gh))
-                m = cv2.resize(m, (gh, gh))
-                panel_tensors = [g, gm, l, m]
-                if roi is not None:
-                    r = _draw_pos(_tensor_to_bgr(roi), pos)
-                    panel_tensors.insert(2, r)  # place ROI next to global mask
-                panels = [
-                    cv2.copyMakeBorder(p, border_px, border_px, border_px, border_px,
-                                       cv2.BORDER_CONSTANT, value=border_color)
-                    for p in panel_tensors
-                ]
-                row = np.concatenate(panels, axis=1)
-                cv2.putText(row, label, (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
-                rows.append(row)
-            out = np.concatenate(rows, axis=0)
-            cv2.imwrite(str(out_dir / f'sample_{i:04d}.png'), out)
-
-        self.augment = prev_augment
-        print(f"[LocalGlobalDataset] Saved {n} visualization(s) to {out_dir}")
 

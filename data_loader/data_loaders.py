@@ -89,7 +89,7 @@ class LocalDataLoader(BaseDataLoader):
 
 class LocalGlobalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0,
-                 num_workers=1, visualize=None,
+                 num_workers=1,
                  hflip=0.0, vflip=0.0, rot90=0.0,
                  fg_ratio=0.0, fg_min=0.05,
                  require_roi=False, roi_jitter=0.0,
@@ -105,8 +105,6 @@ class LocalGlobalDataLoader(BaseDataLoader):
             roi_distort_strength=roi_distort_strength,
             roi_exclusion=roi_exclusion, roi_exclusion_radius=roi_exclusion_radius,
         )
-        if visualize:
-            self.dataset.save_visualizations(visualize)
         self._batch_size = batch_size
         self.fg_ratio = fg_ratio
         self.fg_min = fg_min

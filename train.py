@@ -166,13 +166,11 @@ def main(config):
             amp_dtype = getattr(torch, cfg_trainer.get('amp_dtype', 'bfloat16'))
             with torch.no_grad():
                 for batch in test_data_loader:
-                    *raw, target, _gmask = batch
+                    *raw, target = batch
                     inputs = [trainer._to_device(x) for x in raw]
                     target = target.to(device)
                     with torch.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
                         output = model(*inputs)
-                        if isinstance(output, tuple):
-                            output = output[0]
                     output = output.float()
                     # Loss stays on the raw target so it remains comparable to val_loss.
                     totals['loss'] += criterion(output, target).item()

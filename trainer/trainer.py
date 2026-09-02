@@ -40,7 +40,6 @@ class Trainer(BaseTrainer):
         self.lr_scheduler = lr_scheduler
         self.log_step = int(np.sqrt(data_loader.batch_size))
 
-        self.aux_loss_weight = config['trainer'].get('aux_loss_weight', 0.0)
         self.channels_last = config['trainer'].get('channels_last', False)
         self.accum_steps = max(1, int(config['trainer'].get('accum_steps', 1)))
         if self.accum_steps > 1:
@@ -62,8 +61,7 @@ class Trainer(BaseTrainer):
         self._roi_dropout_end      = dl_args.get('roi_dropout_end', self._roi_dropout_start)
         self._roi_dropout_ramp_ep  = dl_args.get('roi_dropout_ramp_epochs', 0)
 
-        train_keys = ['loss', 'main_loss'] if self.aux_loss_weight > 0 else ['loss']
-        self.train_metrics = MetricTracker(*train_keys, *[m.__name__ for m in self.metric_ftns], writer=self.writer)
+        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
 
         self._save_train_val_previews()
@@ -159,14 +157,9 @@ class Trainer(BaseTrainer):
             )
 
         for batch_idx, batch in enumerate(self.data_loader):
-            # 5-element batches (LocalGlobalDataset): (local, glob, pos, mask, global_mask)
-            # 2-element batches (GlobalDataset / LocalDataset): (image, mask)
-            if len(batch) > 2:
-                *raw_inputs, target, aux_target = batch
-                aux_target = aux_target.to(self.device) if self.aux_loss_weight > 0 else None
-            else:
-                *raw_inputs, target = batch
-                aux_target = None
+            # The mask is always last: (local, pos, roi, mask) with an ROI,
+            # (local, pos, mask) without, (image, mask) for the plain datasets.
+            *raw_inputs, target = batch
             inputs = [self._to_device(x) for x in raw_inputs]
             target = target.to(self.device)
 
@@ -176,17 +169,7 @@ class Trainer(BaseTrainer):
             # inherits the dtypes autocast recorded. bf16 needs no GradScaler.
             with torch.autocast('cuda', dtype=self.amp_dtype, enabled=self.amp):
                 output = self.model(*inputs)
-                if isinstance(output, tuple):
-                    main_out, aux_out = output
-                    main_loss = self.criterion(main_out, target)
-                    if aux_target is not None:
-                        loss = main_loss + self.aux_loss_weight * self.criterion(aux_out, aux_target)
-                    else:
-                        loss = main_loss
-                    output = main_out  # for metrics
-                else:
-                    main_loss = None
-                    loss = self.criterion(output, target)
+                loss = self.criterion(output, target)
             # Gradient accumulation: run accum_steps micro-batches before
             # stepping, so an 8GB card reproduces a larger effective batch. This
             # is exact here, not an approximation -- dice_loss reduces per image
@@ -202,8 +185,6 @@ class Trainer(BaseTrainer):
 
             self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
-            if self.aux_loss_weight > 0 and main_loss is not None:
-                self.train_metrics.update('main_loss', main_loss.item())
             for met in self.metric_ftns:
                 self.train_metrics.update(met.__name__, met(output, target))
 
@@ -248,17 +229,12 @@ class Trainer(BaseTrainer):
         self.valid_metrics.reset()
         with torch.no_grad():
             for batch_idx, batch in enumerate(self.valid_data_loader):
-                if len(batch) > 2:
-                    *raw_inputs, target, _ = batch  # strip global_mask, not used in validation
-                else:
-                    *raw_inputs, target = batch
+                *raw_inputs, target = batch
                 inputs = [self._to_device(x) for x in raw_inputs]
                 target = target.to(self.device)
 
                 with torch.autocast('cuda', dtype=self.amp_dtype, enabled=self.amp):
                     output = self.model(*inputs)
-                    if isinstance(output, tuple):
-                        output = output[0]
                     loss = self.criterion(output, target)
 
                 self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')

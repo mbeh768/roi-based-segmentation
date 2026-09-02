@@ -133,3 +133,6 @@ kfold_results
 old-figures
 roi-ablation/configs
 roi-ablation/results
+
+# intermediate planning documents
+repo-cleanup-scope.txt

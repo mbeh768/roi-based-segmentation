@@ -79,8 +79,8 @@ class NoiseROIDataset(LocalGlobalDataset):
                 "ROI channel, it does not remove it. Removing the channel is a "
                 "different (architecture-changing) experiment."
             )
-        local, glob, pos, roi, mask, global_mask = out
-        return local, glob, pos, self._noise_like(roi, idx), mask, global_mask
+        local, pos, roi, mask = out
+        return local, pos, self._noise_like(roi, idx), mask
 
 
 class NoiseROIDataLoader(LocalGlobalDataLoader):

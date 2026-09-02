@@ -160,9 +160,6 @@ def predict_prob_map(img_path, model, device, p, config, roi_path=None, roi_idx=
     print(f"\nPreprocessing {img_path.name}...")
     tiles, ys, xs, H, W, tile_size, stride, full_arr = tif_to_tiles(
         img_path, p, is_mask=False, scene_index=scene_index)
-    glob = tif_to_tensor(img_path, p.c, is_mask=False,
-                         scene_index=scene_index)         # (3, global_H, global_W)
-
     N = len(tiles)
     local_all = torch.stack(tiles)                                 # (N, 3, tile_H, tile_W) on CPU
 
@@ -217,16 +214,14 @@ def predict_prob_map(img_path, model, device, p, config, roi_path=None, roi_idx=
     save_size = context_size
     probs_tiles = torch.zeros(N, save_size, save_size)               # excluded tiles stay 0
 
-    glob_gpu = glob.to(device)
     roi_gpu = roi.to(device) if roi is not None else None
     with torch.no_grad():
         for k in range(0, len(keep_idx), bs):
             batch_idx = keep_idx[k:k+bs]
             n = len(batch_idx)
             local_batch = local_all[batch_idx].to(device, non_blocking=True)
-            glob_batch  = glob_gpu.unsqueeze(0).expand(n, -1, -1, -1)
             pos_batch   = pos_all[batch_idx].to(device, non_blocking=True)
-            model_args  = [local_batch, glob_batch, pos_batch]
+            model_args  = [local_batch, pos_batch]
             if roi_gpu is not None:
                 model_args.append(roi_gpu.unsqueeze(0).expand(n, -1, -1, -1))
             logits = model(*model_args)                            # (n, 1, ctx_H, ctx_W)
