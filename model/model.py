@@ -7,28 +7,6 @@ import torch.nn.functional as F
 from base import BaseModel
 
 
-def _inverse_geo_feat(x, g):
-    """Unwarp a (B, C, H, W) feature map back to canonical frame per-sample.
-
-    g: (B, 3) long tensor where each row is (hflip, vflip, rot90_k) — the
-    forward geometric aug applied to produce the view this feature came from.
-    The forward order was hflip -> vflip -> rot90_k, so the inverse applies
-    rot90_{-k} -> vflip -> hflip.
-    """
-    out = []
-    for i in range(x.shape[0]):
-        xi = x[i:i+1]
-        hf, vf, k = int(g[i, 0]), int(g[i, 1]), int(g[i, 2])
-        if k:
-            xi = torch.rot90(xi, -k, dims=[-2, -1])
-        if vf:
-            xi = torch.flip(xi, dims=[-2])
-        if hf:
-            xi = torch.flip(xi, dims=[-1])
-        out.append(xi)
-    return torch.cat(out, dim=0)
-
-
 def _crop_and_resize(feat, pos, out_h, out_w, mode='bilinear'):
     """
     Differentiably crop feat (B, C, H, W) at the normalised region
@@ -253,12 +231,3 @@ class ImageNetPretrainedLocalUNet(BaseModel):
         x = self.dec1(u1)
 
         return self.head(x)
-
-
-# EXPERIMENT 13 lives in its own module so this one stays exactly as 9I had it,
-# but config-driven instantiation resolves arch types by getattr on THIS module.
-# Importing at the bottom (rather than the top) is safe despite neighbour_model
-# importing from here: by this point the classes above are defined, and this
-# module is already in sys.modules, so the cycle resolves.
-from model.neighbour_model import NeighbourContextUNet  # noqa: E402,F401
-from model.rebalanced_model import RebalancedDecoderUNet  # noqa: E402,F401

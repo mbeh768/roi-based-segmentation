@@ -313,44 +313,29 @@ class Preprocessor:
         Extract patches from a CHW float32 image (already loaded at tiling_size
         resolution) and save each as a .pt file.
 
-        When context_size > tile_size, image tiles are saved at context_size (centered on the
-        inner tile_size region); mask tiles are always saved at tile_size. Any sampling that
-        runs off the edge of the canvas is zero-padded.
+        Image and mask tiles are both saved at tile_size. The stride loop only
+        visits fully in-bounds top-left positions, so no padding is needed.
 
         Patches saved to:  data_dir/<subdir>/<stem>/patch_YYYY_XXXX.pt
         Coordinates saved: data_dir/<subdir>/<stem>/coordinates.json
         '''
-        tile_size    = self.c['preprocess']['tile_size']
-        stride       = self.c['preprocess']['stride']
-        context_size = self.c['preprocess'].get('context_size', tile_size)
-        data_dir     = Path(self.c['data_loader']['args']['data_dir'])
-        out_dir      = data_dir / subdir / stem
+        tile_size = self.c['preprocess']['tile_size']
+        stride    = self.c['preprocess']['stride']
+        data_dir  = Path(self.c['data_loader']['args']['data_dir'])
+        out_dir   = data_dir / subdir / stem
 
         img_hwc = np.transpose(image, (1, 2, 0))   # HWC for slicing
         H, W    = img_hwc.shape[:2]
-        C       = img_hwc.shape[2]
-
-        # Images save the full context patch (size context_size). Masks save only the
-        # inner patch (size tile_size) — the loss center-crops the model output to match.
-        save_size = context_size if subdir == 'images' else tile_size
-        pad       = (save_size - tile_size) // 2
-        assert pad >= 0 and (save_size - tile_size) % 2 == 0, \
-            f"save_size ({save_size}) must be >= tile_size ({tile_size}) and differ by an even amount"
 
         patch_info = []
         sample_patches = []
 
         for y in range(0, H - tile_size + 1, stride):
             for x in range(0, W - tile_size + 1, stride):
-                cy, cx = y - pad, x - pad
-                patch_hwc = np.zeros((save_size, save_size, C), dtype=np.float32)
-                src_y0 = max(0, cy);  src_y1 = min(H, cy + save_size)
-                src_x0 = max(0, cx);  src_x1 = min(W, cx + save_size)
-                dst_y0 = src_y0 - cy; dst_y1 = src_y1 - cy
-                dst_x0 = src_x0 - cx; dst_x1 = src_x1 - cx
-                if src_y1 > src_y0 and src_x1 > src_x0:
-                    patch_hwc[dst_y0:dst_y1, dst_x0:dst_x1] = img_hwc[src_y0:src_y1, src_x0:src_x1]
+                patch_hwc = img_hwc[y:y + tile_size, x:x + tile_size]
 
+                # .copy() because the slice above is a view into img_hwc, and
+                # torch.from_numpy would otherwise keep the whole canvas alive.
                 patch = np.transpose(patch_hwc, (2, 0, 1)).copy()   # CHW
                 tensor = torch.from_numpy(patch)
 
@@ -367,7 +352,6 @@ class Preprocessor:
                     'stem': stem,
                     'x': x, 'y': y,
                     'width': tile_size, 'height': tile_size,
-                    'context_size': context_size,
                     'image_W': W, 'image_H': H,
                 })
 
@@ -377,7 +361,7 @@ class Preprocessor:
 
         n = len(patch_info)
         print(f"  [local] {subdir}/{stem}/patch_*  {n} patches  "
-              f"(tile={tile_size}, context={context_size}, stride={stride})  "
+              f"(tile={tile_size}, stride={stride})  "
               f"({(H - tile_size) // stride + 1}y × {(W - tile_size) // stride + 1}x)")
 
         if dry_run and sample_patches:

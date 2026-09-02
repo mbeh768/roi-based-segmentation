@@ -217,28 +217,3 @@ class LocalGlobalDataLoader(BaseDataLoader):
             return None
         return DataLoader(sampler=SubsetRandomSampler(self.test_indices),
                           **self.init_kwargs)
-
-
-
-class NeighbourContextDataLoader(LocalGlobalDataLoader):
-    """EXPERIMENT 13 loader: identical splitting to LocalGlobalDataLoader
-    (CASE_GROUPS pair grouping, 10/3/1 case folds), but serves each tile with
-    its 8 neighbours' pre-extracted bottleneck features.
-
-    neighbour_offset is in tiling-space pixels. With 512px tiles, 512 gives a
-    contiguous non-overlapping 3x3 block (1536x1536 of context); the stride-256
-    adjacency would instead give a 1024x1024 block in which half of what each
-    neighbour carries is already inside the centre tile.
-
-    Note the neighbour index is built from the full coordinates.json, so tiles
-    dropped by roi_exclusion are still available AS CONTEXT for tiles that
-    survived -- they are excluded from being predicted, not from being seen.
-    """
-    def __init__(self, *args, neighbour_offset=512, **kwargs):
-        self._neighbour_offset = neighbour_offset
-        super().__init__(*args, **kwargs)
-
-    def _make_dataset(self, data_dir, **kw):
-        from data_loader.neighbour_dataset import NeighbourContextDataset
-        return NeighbourContextDataset(
-            data_dir, neighbour_offset=self._neighbour_offset, **kw)

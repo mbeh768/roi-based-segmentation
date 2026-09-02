@@ -1,1 +1,0 @@
-stitch output and fix whole heart quantification for comparison w hillestad convention
