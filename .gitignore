@@ -124,3 +124,9 @@ datasets/
 .vscode/
 .idea/
 __MACOSX/
+
+# declutter - scope restricted to relevant experiments
+figures-for-pub
+downstream-quantification
+kfold_results
+old-figures

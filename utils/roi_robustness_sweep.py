@@ -142,6 +142,9 @@ def main():
     ap.add_argument('--batch-size', type=int, default=32)
     ap.add_argument('--reference', default='kfold_results/slide_level_iou.json',
                     help='EXPERIMENT 11 result, to assert strength 0 reproduces it')
+    ap.add_argument('--degenerate', action='store_true',
+                    help='evaluate ROIs carrying no or wrong localisation: all-ones '
+                         '(full image), all-zeros (empty), and another slide\'s ROI')
     ap.add_argument('--real-variants', action='store_true',
                     help='pin each REAL annotated ROI variant in turn instead of warping; '
                          'measures actual inter-annotator effect on the same footing')
@@ -168,6 +171,7 @@ def main():
     print(f"{len(runs)} folds, {len(S)} strengths, {a.presets} presets "
           f"-> {len(runs)*len(S)*a.presets} evaluations (inference only)\n")
 
+    all_stems = sorted(p.name for p in (Path(a.data_dir)/'images').iterdir() if p.is_dir())
     results = []
     t0 = time.time()
     for fold in sorted(runs):
@@ -191,6 +195,37 @@ def main():
 
         base = {s: torch.load(Path(a.data_dir) / 'images' / s / f'roi_{s}.pt',
                               weights_only=True) for s in stems}
+
+        if a.degenerate:
+            # The reviewer's question: how much of the result is the ROI itself?
+            #   full   all-ones -- ROI present but carries ZERO localisation. If this still
+            #          beats a no-ROI model, the mechanism helps beyond mere localisation,
+            #          which is the strongest form of the result.
+            #   empty  all-zeros -- the prior actively says "nothing here".
+            #   wrong  another slide's ROI, resampled -- localisation present but WRONG,
+            #          which separates "needs a prior" from "needs a CORRECT prior".
+            other = sorted(set(all_stems) - set(stems))
+            modes = {
+                'full':  {s: torch.ones_like(base[s]) for s in stems},
+                'empty': {s: torch.zeros_like(base[s]) for s in stems},
+            }
+            if other:
+                donor = other[fold % len(other)]
+                dr = torch.load(Path(a.data_dir)/'images'/donor/f'roi_{donor}.pt',
+                                weights_only=True)
+                modes['wrong'] = {s: torch.nn.functional.interpolate(
+                    dr.unsqueeze(0), size=base[s].shape[-2:], mode='nearest')[0]
+                    for s in stems}
+            for mode, rois in modes.items():
+                iou, per_slide = stitch_iou(model, ds, idxs, rois, device, amp, dt,
+                                            a.batch_size)
+                results.append({'fold': fold, 'stems': stems, 'strength': mode,
+                                'preset': 0, 'slide_iou': iou, 'per_slide': per_slide,
+                                'roi_iou': float('nan'), 'roi_surf_px': float('nan'),
+                                'n_test_tiles': len(idxs)})
+                print(f"  fold {fold:>2}  DEGENERATE {mode:<6} IoU {iou:.4f}", flush=True)
+            del model; torch.cuda.empty_cache()
+            continue
 
         if a.real_variants:
             # Each slide's genuinely annotated variants, pinned one at a time. Same
@@ -239,11 +274,12 @@ def main():
         r11 = {f['fold']: f['slide_iou_case'] for f in json.loads(ref.read_text())['folds']}
         d = [abs(r['slide_iou'] - r11[r['fold']])
              for r in results if r['strength'] == 0 and r['fold'] in r11]
-        print(f"\npinned-ROI baseline vs EXPERIMENT 11: mean |diff| {np.mean(d):.4f}, "
-              f"max {np.max(d):.4f}")
-        print("  (expected to differ: 11 samples randomly among the 3 REAL annotated ROI "
-              "variants per tile,\n   so its 0.9243 already averages over real annotators; "
-              "this sweep pins the no-suffix ROI)")
+        if d:   # only the synthetic sweep has a strength-0 point to compare
+            print(f"\npinned-ROI baseline vs EXPERIMENT 11: mean |diff| {np.mean(d):.4f}, "
+                  f"max {np.max(d):.4f}")
+            print("  (expected to differ: 11 samples randomly among the 3 REAL annotated ROI "
+                  "variants per tile,\n   so its 0.9243 already averages over real annotators; "
+                  "this sweep pins the no-suffix ROI)")
         if a.harness_check:
             print("\nharness check -- replicating EXPERIMENT 11's own ROI protocol:")
             worst = 0.0
@@ -277,12 +313,14 @@ def main():
     base_iou = None
     if a.real_variants:
         S = ['real']
+    if a.degenerate:
+        S = ['full', 'empty', 'wrong']
     for s in S:
         rs = [r for r in results if r['strength'] == s]
         v = [r['slide_iou'] for r in rs]
         if base_iou is None:
             base_iou = float(np.mean(v))
-        print(f"{s:>9g} {np.mean(v):>10.4f} {np.std(v):>8.4f} "
+        print(f"{str(s):>9} {np.mean(v):>10.4f} {np.std(v):>8.4f} "
               f"{np.mean(v)-base_iou:>+9.4f} {np.mean([r['roi_iou'] for r in rs]):>9.3f} "
               f"{np.mean([r['roi_surf_px'] for r in rs]):>8.0f}")
 
