@@ -42,8 +42,7 @@
     },
     "loss": "bce_dice",
     "metrics": [
-        "iou",
-        "accuracy"
+        "iou"
     ],
     "lr_scheduler": {
         "type": "CosineAnnealingLR",
