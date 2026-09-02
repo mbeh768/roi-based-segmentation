@@ -114,17 +114,9 @@ def main(config):
                     with torch.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
                         output = model(*inputs)
                     output = output.float()
-                    # Loss stays on the raw target so it remains comparable to val_loss.
                     totals['loss'] += criterion(output, target).item()
-                    # Metrics use a HARD target. Some slides store background as
-                    # ~0.0157 rather than 0.0, which inflates target.sum() and so
-                    # inflates the IoU union -- biasing the score low. Thresholding
-                    # makes this a true IoU. Applied at test time only; train/val
-                    # metrics keep the original definition so historical runs and
-                    # the monitored val_loss remain comparable.
-                    hard_target = (target > 0.5).float()
                     for met in metrics:
-                        totals[met.__name__] += met(output, hard_target)
+                        totals[met.__name__] += met(output, target)
                     n_batches += 1
             results = {f'test_{k}': v / max(n_batches, 1) for k, v in totals.items()}
             results.update(test_cases=cases.get('test'), val_cases=cases.get('val'),

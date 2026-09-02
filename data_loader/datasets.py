@@ -94,15 +94,15 @@ class LocalGlobalDataset(Dataset):
                 patch_path = coords_file.parent / entry['filename']
                 self.items.append((patch_path, stem, entry))
             if self.require_roi:
-                primary = coords_file.parent / f'roi_{stem}.pt'
-                if not primary.exists():
+                # Exactly one ROI per slide: roi_<stem>.pt, no suffix. Any
+                # roi_<stem>_N.pt variants present on disk are ignored.
+                roi_path = coords_file.parent / f'roi_{stem}.pt'
+                if not roi_path.exists():
                     raise FileNotFoundError(
-                        f"require_roi=True but missing ROI for stem '{stem}': {primary}. "
+                        f"require_roi=True but missing ROI for stem '{stem}': {roi_path}. "
                         f"Run annotate_globals.py --data-dir {data_dir}."
                     )
-                self.stem_to_roi[stem] = sorted(
-                    coords_file.parent.glob(f'roi_{stem}*.pt')
-                )
+                self.stem_to_roi[stem] = roi_path
 
         assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
 
@@ -115,27 +115,21 @@ class LocalGlobalDataset(Dataset):
     def _filter_by_roi_exclusion(self):
         import cv2
         stem_dist = {}
-        for stem, roi_paths in self.stem_to_roi.items():
-            # Union of all ROIs: keep a tile that is near any of the available ROIs.
-            roi_union = None
-            H_roi = W_roi = 0
-            for roi_path in roi_paths:
-                roi = torch.load(roi_path, weights_only=True).squeeze(0).numpy()
-                roi_bin = (roi > 0.5).astype(np.uint8)
-                H_roi, W_roi = roi_bin.shape
-                roi_union = roi_bin if roi_union is None else np.maximum(roi_union, roi_bin)
-            if roi_union is None or roi_union.max() == 0:
-                stem_dist[stem] = None
-            else:
-                dist = cv2.distanceTransform(1 - roi_union, cv2.DIST_L2, 5)
-                stem_dist[stem] = (dist, H_roi, W_roi)
+        for stem, roi_path in self.stem_to_roi.items():
+            roi_bin = (torch.load(roi_path, weights_only=True).squeeze(0).numpy() > 0.5)
+            roi_bin = roi_bin.astype(np.uint8)
+            if roi_bin.max() == 0:
+                raise ValueError(
+                    f"ROI for stem '{stem}' is empty ({roi_path}). Filtering against it "
+                    f"would keep every tile for this slide instead of the ROI-adjacent "
+                    f"ones, silently skewing the split toward background.")
+            H_roi, W_roi = roi_bin.shape
+            stem_dist[stem] = (cv2.distanceTransform(1 - roi_bin, cv2.DIST_L2, 5),
+                               H_roi, W_roi)
 
         kept = []
         for item in self.items:
             _, stem, entry = item
-            if stem not in stem_dist or stem_dist[stem] is None:
-                kept.append(item)
-                continue
             dist, H_roi, W_roi = stem_dist[stem]
             image_H, image_W = entry['image_H'], entry['image_W']
             y, x = entry['y'], entry['x']
@@ -178,7 +172,7 @@ class LocalGlobalDataset(Dataset):
 
         roi = None
         if self.require_roi:
-            roi = torch.load(random.choice(self.stem_to_roi[stem]), weights_only=True)
+            roi = torch.load(self.stem_to_roi[stem], weights_only=True)
 
         if self.augment:
             if roi is not None:

@@ -255,6 +255,17 @@ class Preprocessor:
             if vmax > vmin:
                 image = (image - vmin) / (vmax - vmin)
 
+        # Intended as a NO-OP: masks should already be binary here. Two of the
+        # twenty source masks carry a non-zero background (4 and 5), which
+        # reaches the loss as ~0.016 instead of 0, so the threshold always runs
+        # and warns whenever it actually changed something.
+        if is_mask:
+            binary = (image > 0.5).astype(np.float32)
+            if not np.array_equal(binary, image):
+                print(f"\tWARNING {Path(path).name}: mask was not binary "
+                      f"{np.unique(image)[:6]} -- thresholded at >0.5")
+            image = binary
+
         if standardize:
             for c in range(image.shape[0]):
                 ch_min = image[c].min()
