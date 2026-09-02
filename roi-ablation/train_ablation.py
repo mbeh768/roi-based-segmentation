@@ -109,8 +109,11 @@ def completed(save_root, name):
 
 def main():
     ap = argparse.ArgumentParser(description='ROI ablation: both arms, 14-fold LOCO')
-    ap.add_argument('--base-config', default=str(ROOT / 'kfold_results' / 'KFOLD_LOCO' / 'config.json'),
-                    help='flagship LOCO config the arms are derived from')
+    ap.add_argument('--base-config', required=True,
+                    help='the config this ablation is derived from. Required rather '
+                         'than defaulted: each ablation gets its own json, and a '
+                         'default would silently attach the arms to the wrong '
+                         'baseline if that file changed underneath them.')
     ap.add_argument('--arms', default='noise_guided',
                     help=f'subset of {list(ARMS)}; "noise" drops tile selection too '
                          f'and costs ~4.8x the steps per fold, so it is not run by default')

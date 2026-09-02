@@ -4,25 +4,7 @@ import random
 import numpy as np
 import cv2
 import torch
-import torch.nn.functional as F
 from torch.utils.data import Dataset
-
-
-def _roi_grid_distort(roi, num_steps=5, strength=0.3):
-    """Random grid distortion on a (1, H, W) ROI tensor. Decouples ROI from anatomy
-    so the model can't memorize a pixel-perfect template."""
-    _, H, W = roi.shape
-    yy, xx = torch.meshgrid(torch.linspace(-1, 1, H), torch.linspace(-1, 1, W),
-                            indexing='ij')
-    base = torch.stack([xx, yy], dim=-1)  # (H, W, 2)
-    cp = torch.randn(2, num_steps, num_steps) * strength
-    cp_up = F.interpolate(cp.unsqueeze(0), size=(H, W),
-                          mode='bilinear', align_corners=True).squeeze(0)
-    base[..., 0] = base[..., 0] + cp_up[0]
-    base[..., 1] = base[..., 1] + cp_up[1]
-    out = F.grid_sample(roi.unsqueeze(0), base.unsqueeze(0), mode='nearest',
-                        padding_mode='border', align_corners=True).squeeze(0)
-    return out
 
 
 def _sample_geo_params(flags):

@@ -11,6 +11,8 @@
 # Nothing here is host-specific; everything that differs between machines is an
 # environment variable:
 #
+#   BASE_CONFIG REQUIRED. The json this ablation derives from; each ablation
+#               gets its own, so there is deliberately no default.
 #   PY          interpreter to use. Conda is frequently absent from PATH in
 #               non-login and remote-spawned shells, so pass the environment's
 #               python by ABSOLUTE path. Default: whatever `python` resolves to.
@@ -47,6 +49,7 @@ PY="${PY:-python}"
 DEVICE="${DEVICE:-0}"
 ARMS="${ARMS:-noise_guided}"
 FOLDS="${FOLDS:-0-13}"
+BASE_CONFIG="${BASE_CONFIG:-}"
 DATA_DIR="${DATA_DIR:-}"
 BATCH_SIZE="${BATCH_SIZE:-}"
 MIN_FREE_MB="${MIN_FREE_MB:-24000}"
@@ -62,6 +65,11 @@ cd "$ROOT"
 # here is cheaper than failing 40 minutes into fold 0.
 
 [ -f train.py ] || { echo "ERROR: no train.py in $ROOT -- not a repo root" >&2; exit 1; }
+
+# Cheapest and most certain check first: a missing required argument should not
+# wait behind a GPU that may be busy for hours.
+[ -n "$BASE_CONFIG" ] || { echo "ERROR: set BASE_CONFIG to the json this ablation derives from." >&2; exit 1; }
+[ -f "$BASE_CONFIG" ] || { echo "ERROR: BASE_CONFIG=$BASE_CONFIG does not exist." >&2; exit 1; }
 
 command -v "$PY" >/dev/null 2>&1 || [ -x "$PY" ] || {
     echo "ERROR: PY=$PY is not executable." >&2
@@ -97,7 +105,8 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 # --- assemble the command -------------------------------------------------
-ARGS=(roi-ablation/train_ablation.py --arms "$ARMS" --folds "$FOLDS" --device "$DEVICE")
+ARGS=(roi-ablation/train_ablation.py --base-config "$BASE_CONFIG"
+      --arms "$ARMS" --folds "$FOLDS" --device "$DEVICE")
 [ -n "$DATA_DIR" ]   && ARGS+=(--data-dir "$DATA_DIR")
 [ -n "$BATCH_SIZE" ] && ARGS+=(--batch-size "$BATCH_SIZE")
 
