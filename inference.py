@@ -61,13 +61,14 @@ def to_display(tensor):
 def tif_to_tiles(path, p, is_mask=False, scene_index=0):
     """Load TIFF at tiling_size resolution and cut into tiles.
 
-    Image tiles are extracted at context_size (centered on the inner tile_size region);
-    mask tiles at tile_size. Sampling that runs off the canvas is zero-padded.
+    Image and mask tiles are both cut at tile_size. The stride loop only visits
+    fully in-bounds top-left positions, so no padding is needed. This mirrors
+    preprocess.py's save_local(); the two must agree or inference sees tiles cut
+    differently from the ones the model trained on.
     """
     tile_size    = p.c['preprocess']['tile_size']
     stride       = p.c['preprocess']['stride']
     tiling_size  = p.c['preprocess']['tiling_size']
-    context_size = p.c['preprocess'].get('context_size', tile_size)
 
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
     imagenet_norm = p.c['preprocess'].get('imagenet_norm', False)
@@ -79,10 +80,6 @@ def tif_to_tiles(path, p, is_mask=False, scene_index=0):
 
     img_hwc = np.transpose(arr, (1, 2, 0))
     H, W = img_hwc.shape[:2]
-    C = img_hwc.shape[2]
-
-    save_size = tile_size if is_mask else context_size
-    pad = (save_size - tile_size) // 2
 
     ys = list(range(0, H - tile_size + 1, stride))
     xs = list(range(0, W - tile_size + 1, stride))
@@ -90,14 +87,9 @@ def tif_to_tiles(path, p, is_mask=False, scene_index=0):
     tiles = []
     for y in ys:
         for x in xs:
-            cy, cx = y - pad, x - pad
-            patch_hwc = np.zeros((save_size, save_size, C), dtype=np.float32)
-            src_y0 = max(0, cy);  src_y1 = min(H, cy + save_size)
-            src_x0 = max(0, cx);  src_x1 = min(W, cx + save_size)
-            dst_y0 = src_y0 - cy; dst_y1 = src_y1 - cy
-            dst_x0 = src_x0 - cx; dst_x1 = src_x1 - cx
-            if src_y1 > src_y0 and src_x1 > src_x0:
-                patch_hwc[dst_y0:dst_y1, dst_x0:dst_x1] = img_hwc[src_y0:src_y1, src_x0:src_x1]
+            patch_hwc = img_hwc[y:y + tile_size, x:x + tile_size]
+            # .copy() because the slice is a view into img_hwc, which would
+            # otherwise be kept alive by every tile tensor.
             tiles.append(torch.from_numpy(np.transpose(patch_hwc, (2, 0, 1)).copy()))
 
     return tiles, ys, xs, H, W, tile_size, stride, arr
@@ -163,13 +155,10 @@ def predict_prob_map(img_path, model, device, p, config, roi_path=None, roi_idx=
     N = len(tiles)
     local_all = torch.stack(tiles)                                 # (N, 3, tile_H, tile_W) on CPU
 
-    # pos spans the full context window (matches LocalGlobalDataset); reduces to
-    # the inner tile when context_size == tile_size.
-    context_size = p.c['preprocess'].get('context_size', tile_size)
-    pad = (context_size - tile_size) // 2
+    # pos is the tile's normalised extent on the slide, matching how
+    # LocalGlobalDataset builds it from coordinates.json.
     pos_all = torch.stack([
-        torch.tensor([(y - pad) / H, (x - pad) / W,
-                      (y - pad + context_size) / H, (x - pad + context_size) / W],
+        torch.tensor([y / H, x / W, (y + tile_size) / H, (x + tile_size) / W],
                      dtype=torch.float32)
         for y in ys for x in xs
     ])                                                              # (N, 4) on CPU
@@ -211,8 +200,7 @@ def predict_prob_map(img_path, model, device, p, config, roi_path=None, roi_idx=
     bs = int(((config or {}).get('data_loader', {}).get('args', {}).get('batch_size', 8)))
     bs = max(1, bs)
 
-    save_size = context_size
-    probs_tiles = torch.zeros(N, save_size, save_size)               # excluded tiles stay 0
+    probs_tiles = torch.zeros(N, tile_size, tile_size)               # excluded tiles stay 0
 
     roi_gpu = roi.to(device) if roi is not None else None
     with torch.no_grad():
@@ -226,12 +214,6 @@ def predict_prob_map(img_path, model, device, p, config, roi_path=None, roi_idx=
                 model_args.append(roi_gpu.unsqueeze(0).expand(n, -1, -1, -1))
             logits = model(*model_args)                            # (n, 1, ctx_H, ctx_W)
             probs_tiles[batch_idx] = torch.sigmoid(logits).squeeze(1).cpu()
-
-    # If the model saw a context patch larger than the stitch tile, crop predictions
-    # back to the centered tile_size region before stitching.
-    if probs_tiles.shape[-1] != tile_size:
-        off = (probs_tiles.shape[-1] - tile_size) // 2
-        probs_tiles = probs_tiles[..., off:off + tile_size, off:off + tile_size]
 
     # Stitch only kept tiles so excluded-tile zeros don't dilute predictions in
     # overlap regions near the ROI exclusion boundary.

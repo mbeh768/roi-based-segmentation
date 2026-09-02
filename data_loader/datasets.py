@@ -49,76 +49,6 @@ def _geo_augment(*tensors, pos, flags):
     return (*tensors, pos)
 
 
-class GlobalDataset(Dataset):
-    """
-    Loads only the downsampled global.pt image + corresponding global mask.
-
-    Each patient directory must contain:
-        data/images/<stem>/global.pt  — (3, H, W) float32
-        data/masks/<stem>/global.pt   — (1, H, W) float32
-
-    Returns (image, mask).
-    """
-    def __init__(self, data_dir):
-        data_dir = Path(data_dir)
-        image_dir = data_dir / 'images'
-        mask_dir  = data_dir / 'masks'
-
-        self.pairs = []
-        for img_path in sorted(image_dir.glob('*/global.pt')):
-            mask_path = mask_dir / img_path.parent.name / 'global.pt'
-            if mask_path.exists():
-                self.pairs.append((img_path, mask_path))
-
-        assert len(self.pairs) > 0, f"No global.pt pairs found in {data_dir}"
-
-    def __len__(self):
-        return len(self.pairs)
-
-    def __getitem__(self, idx):
-        img_path, mask_path = self.pairs[idx]
-        image = torch.load(img_path,  weights_only=True)
-        mask  = torch.load(mask_path, weights_only=True)
-        return image, mask
-
-
-class LocalDataset(Dataset):
-    """
-    Loads local patch tiles + corresponding masks only — no global context.
-    Returns (image, mask).
-    """
-    def __init__(self, data_dir):
-        data_dir = Path(data_dir)
-        self.image_dir = data_dir / 'images'
-        self.mask_dir  = data_dir / 'masks'
-
-        self.items = []
-        for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
-            stem = coords_file.parent.name
-            with open(coords_file) as f:
-                entries = json.load(f)
-            for entry in entries:
-                patch_path = coords_file.parent / entry['filename']
-                self.items.append((patch_path, stem))
-
-        assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
-
-    def __len__(self):
-        return len(self.items)
-
-    def __getitem__(self, idx):
-        patch_path, stem = self.items[idx]
-        image = torch.load(patch_path, weights_only=True)
-
-        mask_path = self.mask_dir / stem / patch_path.name
-        if mask_path.exists():
-            mask = torch.load(mask_path, weights_only=True)
-        else:
-            mask = torch.zeros(1, image.shape[-2], image.shape[-1])
-
-        return image, mask
-
-
 class LocalGlobalDataset(Dataset):
     """
     Loads a local patch tile + its mask, with the tile's position on the slide.
@@ -235,14 +165,10 @@ class LocalGlobalDataset(Dataset):
         H, W = entry['image_H'], entry['image_W']
         y, x = entry['y'], entry['x']
         h, w = entry['height'], entry['width']
-        # pos must describe the full context window the local patch spans, not the
-        # inner tile — the model bottleneck encodes the whole context patch, so the
-        # global/ROI crop has to register against that same extent. Reduces to the
-        # inner tile when context_size == tile_size.
-        ctx = entry.get('context_size', w)
-        pad = (ctx - w) // 2
-        cy, cx = y - pad, x - pad
-        pos = torch.tensor([cy / H, cx / W, (cy + ctx) / H, (cx + ctx) / W], dtype=torch.float32)
+        # pos is the tile's extent on the slide, normalised, and is what the model
+        # uses to crop the ROI to this tile. Image and mask tiles are both saved
+        # at tile_size, so the tile IS the whole extent the encoder sees.
+        pos = torch.tensor([y / H, x / W, (y + h) / H, (x + w) / W], dtype=torch.float32)
 
         mask_path = self.mask_dir / stem / patch_path.name
         if mask_path.exists():
@@ -270,22 +196,5 @@ class LocalGlobalDataset(Dataset):
             return local, pos, roi, mask
         return local, pos, mask
 
-    def foreground_indices(self, min_ratio=0.05):
-        """Partition tile indices into (fg, bg) by mask foreground fraction."""
-        fg, bg = [], []
-        print(f"[LocalGlobalDataset] Scanning {len(self.items)} tiles "
-              f"for foreground ratio >= {min_ratio}...")
-        for i, (patch_path, stem, _) in enumerate(self.items):
-            mask_path = self.mask_dir / stem / patch_path.name
-            if not mask_path.exists():
-                bg.append(i)
-                continue
-            mask = torch.load(mask_path, weights_only=True)
-            frac = (mask > 0.5).float().mean().item()
-            (fg if frac >= min_ratio else bg).append(i)
-        total = len(self.items)
-        print(f"[LocalGlobalDataset] Foreground tiles: "
-              f"{len(fg)}/{total} ({100*len(fg)/total:.1f}%)")
-        return fg, bg
 
 

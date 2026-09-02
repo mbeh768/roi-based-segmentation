@@ -58,7 +58,6 @@
         "czi_max_px": 5000000000,
         "tiling_size": 8192,
         "tile_size": 512,
-        "context_size": 512,
         "stride": 256,
         "standardize": true,
         "imagenet_norm": false,
