@@ -135,5 +135,4 @@ roi-ablation/configs
 roi-ablation/results
 
 # intermediate planning documents
-repo-cleanup-scope.txt
-completed-repo-cleanup-tasks.txt
+repo-cleanup
