@@ -67,65 +67,7 @@ def main(config):
         criterion = getattr(module_loss, _loss_cfg)
     metrics = [getattr(module_metric, met) for met in config['metrics']]
 
-    # build optimizer, learning rate scheduler. delete every lines containing lr_scheduler for disabling scheduler
-    # optimizer config may carry an optional "encoder_lr_scale" for discriminative
-    # fine-tuning of unfrozen local-encoder stages. init_obj ignores this sibling
-    # key (it only reads "type"/"args"). Accepts either:
-    #   - a scalar  -> every trainable backbone param trains at base_lr * scale
-    #   - a dict    -> per-stage scales keyed by backbone stage index, e.g.
-    #                  {"4": 0.5, "3": 0.25}; stages absent from the dict (but
-    #                  still trainable) default to scale 1.0 (base_lr).
-    # The decoder/head always train at base_lr. Stage->module mapping comes from
-    # the model's _STAGE_MODULES, so adding more unfrozen stages with their own
-    # lrs is purely a config change.
-    enc_lr_scale = config['optimizer'].get('encoder_lr_scale', None)
-    if enc_lr_scale is not None:
-        base_lr = config['optimizer']['args']['lr']
-        core = model.module if isinstance(model, torch.nn.DataParallel) else model
-        stage_modules = getattr(core, '_STAGE_MODULES', None)
-        if stage_modules is None or not hasattr(core, 'backbone'):
-            raise ValueError(
-                "encoder_lr_scale is set but model exposes no backbone/_STAGE_MODULES "
-                "to map encoder stages to parameters")
-
-        # map each backbone param id -> its stage index
-        stage_of = {}
-        for stage, mod_names in stage_modules.items():
-            for mod_name in mod_names:
-                mod = getattr(core.backbone, mod_name, None)
-                if mod is None:
-                    continue
-                for p in mod.parameters():
-                    stage_of[id(p)] = stage
-
-        scale_is_dict = isinstance(enc_lr_scale, dict)
-        scale_by_stage = ({int(k): float(v) for k, v in enc_lr_scale.items()}
-                          if scale_is_dict else None)
-
-        other_params = []
-        by_scale = {}  # scale -> list of params (groups merged by identical lr)
-        for p in model.parameters():
-            if not p.requires_grad:
-                continue
-            stage = stage_of.get(id(p), None)
-            if stage is None:
-                other_params.append(p)              # decoder / head
-            elif scale_is_dict:
-                scale = scale_by_stage.get(stage, 1.0)
-                by_scale.setdefault(scale, []).append(p)
-            else:
-                by_scale.setdefault(float(enc_lr_scale), []).append(p)
-
-        trainable_params = [{'params': other_params}]   # base lr group
-        for scale in sorted(by_scale):
-            trainable_params.append({'params': by_scale[scale],
-                                     'lr': base_lr * scale})
-            logger.info('encoder_lr_scale: %d params at lr=%g (scale %g)',
-                        len(by_scale[scale]), base_lr * scale, scale)
-        logger.info('%d decoder/head params at base lr=%g',
-                    len(other_params), base_lr)
-    else:
-        trainable_params = filter(lambda p: p.requires_grad, model.parameters())
+    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
     optimizer = config.init_obj('optimizer', torch.optim, trainable_params)
     lr_scheduler = config.init_obj('lr_scheduler', torch.optim.lr_scheduler, optimizer)
 
