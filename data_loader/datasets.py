@@ -158,8 +158,7 @@ class LocalGlobalDataset(Dataset):
     directly from disk by annotate_globals.py and the trainer's split previews.
     """
     def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0,
-                 require_roi=False, roi_jitter=0.0,
-                 roi_dropout=0.0, roi_distort=0.0, roi_distort_strength=0.3,
+                 require_roi=False,
                  roi_exclusion=False, roi_exclusion_radius=0.05):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
@@ -167,10 +166,6 @@ class LocalGlobalDataset(Dataset):
         self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
         self.augment = any(v > 0 for v in self.aug_flags.values())
         self.require_roi = require_roi
-        self.roi_jitter = roi_jitter
-        self.roi_dropout = roi_dropout
-        self.roi_distort = roi_distort
-        self.roi_distort_strength = roi_distort_strength
         self.roi_exclusion = roi_exclusion
         self.roi_exclusion_radius = roi_exclusion_radius
 
@@ -276,12 +271,6 @@ class LocalGlobalDataset(Dataset):
         roi = None
         if self.require_roi:
             roi = torch.load(random.choice(self.stem_to_roi[stem]), weights_only=True)
-            if self.roi_jitter > 0 and random.random() < self.roi_jitter:
-                roi = torch.ones_like(roi)
-            if self.roi_dropout > 0 and random.random() < self.roi_dropout:
-                roi = torch.zeros_like(roi)
-            if self.roi_distort > 0 and random.random() < self.roi_distort:
-                roi = _roi_grid_distort(roi, strength=self.roi_distort_strength)
 
         if self.augment:
             if roi is not None:

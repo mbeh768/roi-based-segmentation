@@ -43,11 +43,6 @@ def _resolve(model):
     """Find the layer the ROI is concatenated into, and the ROI's channel index."""
     if not getattr(model, 'use_roi', False):
         raise ValueError("model has use_roi=False -- there is no ROI channel to probe")
-    if getattr(model, 'roi_inject', 'bottleneck') != 'bottleneck':
-        raise ValueError(
-            f"probe assumes roi_inject='bottleneck'; got {model.roi_inject!r}. With "
-            f"'skips' the ROI enters five layers and one scalar cannot summarise it."
-        )
     conv = model.up5
     roi_ch = getattr(model, 'roi_ch', 1)
     # ROI channels are concatenated last, so they are the final roi_ch input channels.

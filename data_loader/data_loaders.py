@@ -92,17 +92,12 @@ class LocalGlobalDataLoader(BaseDataLoader):
                  num_workers=1,
                  hflip=0.0, vflip=0.0, rot90=0.0,
                  fg_ratio=0.0, fg_min=0.05,
-                 require_roi=False, roi_jitter=0.0,
-                 roi_dropout=0.0, roi_distort=0.0, roi_distort_strength=0.3,
-                 roi_distort_end=None, roi_distort_ramp_epochs=0,
-                 roi_dropout_end=None, roi_dropout_ramp_epochs=0,
+                 require_roi=False,
                  roi_exclusion=False, roi_exclusion_radius=0.05,
                  split_seed=0, n_folds=0, fold=0, n_val_cases=0):
         self.dataset = self._make_dataset(
             data_dir, hflip=hflip, vflip=vflip, rot90=rot90,
-            require_roi=require_roi, roi_jitter=roi_jitter,
-            roi_dropout=roi_dropout, roi_distort=roi_distort,
-            roi_distort_strength=roi_distort_strength,
+            require_roi=require_roi,
             roi_exclusion=roi_exclusion, roi_exclusion_radius=roi_exclusion_radius,
         )
         self._batch_size = batch_size

@@ -48,19 +48,6 @@ class Trainer(BaseTrainer):
                              self.accum_steps * data_loader.batch_size)
         self.optimizer.zero_grad()
 
-        switch_cfg = config['trainer'].get('loss_switch', None)
-        self._switch_cfg  = switch_cfg   # {trigger_metric, threshold, loss} or None
-        self._switch_done = False
-
-        dl_args = config['data_loader']['args']
-        self._roi_distort_start    = dl_args.get('roi_distort_strength', 0.0)
-        self._roi_distort_end      = dl_args.get('roi_distort_end', self._roi_distort_start)
-        self._roi_distort_ramp_ep  = dl_args.get('roi_distort_ramp_epochs', 0)
-
-        self._roi_dropout_start    = dl_args.get('roi_dropout', 0.0)
-        self._roi_dropout_end      = dl_args.get('roi_dropout_end', self._roi_dropout_start)
-        self._roi_dropout_ramp_ep  = dl_args.get('roi_dropout_ramp_epochs', 0)
-
         self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
 
@@ -144,18 +131,6 @@ class Trainer(BaseTrainer):
         self.model.train()
         self.train_metrics.reset()
 
-        if self._roi_distort_ramp_ep > 0:
-            t = min((epoch - 1) / self._roi_distort_ramp_ep, 1.0)
-            self.data_loader.dataset.roi_distort_strength = (
-                self._roi_distort_start + t * (self._roi_distort_end - self._roi_distort_start)
-            )
-
-        if self._roi_dropout_ramp_ep > 0:
-            t = min((epoch - 1) / self._roi_dropout_ramp_ep, 1.0)
-            self.data_loader.dataset.roi_dropout = (
-                self._roi_dropout_start + t * (self._roi_dropout_end - self._roi_dropout_start)
-            )
-
         for batch_idx, batch in enumerate(self.data_loader):
             # The mask is always last: (local, pos, roi, mask) with an ROI,
             # (local, pos, mask) without, (image, mask) for the plain datasets.
@@ -201,18 +176,6 @@ class Trainer(BaseTrainer):
         if self.do_validation:
             val_log = self._valid_epoch(epoch)
             log.update(**{'val_'+k : v for k, v in val_log.items()})
-
-        if self._switch_cfg and not self._switch_done:
-            metric = self._switch_cfg['trigger_metric']
-            key = metric if metric.startswith('val_') else f'val_{metric}'
-            if log.get(key, 0.0) >= self._switch_cfg['threshold']:
-                import model.loss as module_loss
-                self.criterion = getattr(module_loss, self._switch_cfg['loss'])
-                self._switch_done = True
-                self.logger.info(
-                    f"[loss_switch] {key}={log[key]:.4f} >= {self._switch_cfg['threshold']} "
-                    f"-> criterion switched to {self._switch_cfg['loss']}"
-                )
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()

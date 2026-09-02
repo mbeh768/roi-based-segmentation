@@ -1,38 +1,7 @@
-import math
-
 import timm
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from base import BaseModel
-
-
-def _crop_and_resize(feat, pos, out_h, out_w, mode='bilinear'):
-    """
-    Differentiably crop feat (B, C, H, W) at the normalised region
-    pos (B, 4) = [y0, x0, y1, x1] in [0, 1], then resize to (out_h, out_w)
-    via F.grid_sample. mode='bilinear' (default) for smooth feature maps;
-    mode='nearest' keeps a low-res binary ROI crisp when upsampled.
-    """
-    B, _, H, W = feat.shape
-    y0, x0, y1, x1 = pos[:, 0], pos[:, 1], pos[:, 2], pos[:, 3]
-
-    # build a dense sampling grid (B, out_h, out_w, 2) in [-1, 1]
-    ts = torch.linspace(0, 1, out_h, device=feat.device)  # (out_h,)
-    us = torch.linspace(0, 1, out_w, device=feat.device)  # (out_w,)
-
-    # interpolate positions inside the crop box
-    gy = (y0.view(B, 1) + ts.view(1, out_h) * (y1 - y0).view(B, 1)) * 2 - 1  # (B, out_h)
-    gx = (x0.view(B, 1) + us.view(1, out_w) * (x1 - x0).view(B, 1)) * 2 - 1  # (B, out_w)
-
-    # grid_sample expects (x, y) order in last dim
-    grid = torch.stack([
-        gx.view(B, 1, out_w).expand(B, out_h, out_w),
-        gy.view(B, out_h, 1).expand(B, out_h, out_w),
-    ], dim=-1)  # (B, out_h, out_w, 2)
-
-    # align_corners only applies to bilinear; grid_sample ignores it for nearest.
-    return F.grid_sample(feat, grid, mode=mode, align_corners=True, padding_mode='border')
 
 
 def _double_conv(in_ch, out_ch):
@@ -48,8 +17,9 @@ def _double_conv(in_ch, out_ch):
 
 class ImageNetPretrainedLocalUNet(BaseModel):
     """
-    ImageNet local encoder + optional ROI concatenated at the bottleneck
-    (and, with roi_inject='skips', at every decoder skip connection).
+    ImageNet local encoder, U-Net decoder, with the ROI concatenated onto the
+    bottleneck as roi_ch extra channels. That concatenation is the only point at
+    which the network sees the ROI.
 
     Config:
         "arch": {"type": "ImageNetPretrainedLocalUNet", "args": {
@@ -60,8 +30,13 @@ class ImageNetPretrainedLocalUNet(BaseModel):
             "freeze_local_encoder": true,
             "bottleneck_dropout": 0.1,
             "use_roi": true,
-            "roi_ch": 1
+            "roi_ch": 1,
+            "skip_proj": true
         }}
+
+    skip_proj adds an identity-initialised 1x1 convolution to each encoder skip
+    before it is concatenated, as an adapter for the frozen ImageNet features.
+    With it off the skips are passed through raw.
 
     freeze_local_encoder accepts either a bool (True = freeze all stages,
     False = freeze none) or a list of stage indices in [0..4] to freeze
@@ -85,28 +60,11 @@ class ImageNetPretrainedLocalUNet(BaseModel):
                  freeze_local_encoder=False,
                  bottleneck_dropout=0.1,
                  use_roi=False, roi_ch=1,
-                 roi_inject='bottleneck', roi_interp='bilinear',
-                 decoder_half_depth=False, decoder_ch=None):
+                 skip_proj=False):
         super().__init__()
 
         self.use_roi = use_roi
         self.roi_ch = roi_ch if use_roi else 0
-
-        # roi_inject controls where the ROI guidance enters the decoder:
-        #   'bottleneck' (default) — single coarse crop at /32, original behaviour.
-        #   'skips'                — additionally fused at every decoder concat
-        #                            (/16,/8,/4,/2,/1) so fine ROI detail reaches
-        #                            the resolution where pixel decisions are made.
-        # roi_interp is the resampling mode for ROI crops ('nearest' keeps a
-        # low-res binary ROI crisp when upsampled; 'bilinear' for the legacy path).
-        if roi_inject not in ('bottleneck', 'skips'):
-            raise ValueError(f"roi_inject must be 'bottleneck' or 'skips', got {roi_inject!r}")
-        if roi_interp not in ('bilinear', 'nearest'):
-            raise ValueError(f"roi_interp must be 'bilinear' or 'nearest', got {roi_interp!r}")
-        self.roi_inject = roi_inject
-        self.roi_interp = roi_interp
-        skip_roi_ch = self.roi_ch if (use_roi and roi_inject == 'skips') else 0
-        self.skip_roi_ch = skip_roi_ch
 
         self.backbone = timm.create_model(
             backbone, pretrained=backbone_pretrained, features_only=True,
@@ -116,6 +74,12 @@ class ImageNetPretrainedLocalUNet(BaseModel):
         assert len(enc_ch) == 5, (
             f"backbone {backbone} exposes {len(enc_ch)} stages; expected 5"
         )
+        # Channel COUNTS per encoder stage, coarsest last. For resnet18:
+        # c1=64 (/2), c2=64 (/4), c3=128 (/8), c4=256 (/16), c5=512 (/32).
+        # The decoder is written in these same counts: each ConvTranspose emits
+        # the count of the skip it is about to concatenate with, so the levels
+        # are offset by one (up5 lifts the /32 bottleneck to /16, where skip4
+        # lives) and no separate decoder namespace is needed.
         c1, c2, c3, c4, c5 = enc_ch
 
         if freeze_local_encoder is True:
@@ -140,93 +104,109 @@ class ImageNetPretrainedLocalUNet(BaseModel):
 
         self.bot_drop = nn.Dropout2d(bottleneck_dropout)
 
-        # ---- decoder ablations (EXPERIMENT 5D-5I) --------------------------
-        # decoder_half_depth (5D/5E): drop every other decoder level, so each
-        #   remaining ConvTranspose upsamples by 4 instead of 2 and skips are
-        #   consumed every other stage (s4 and s2 survive; s3 and s1 do not).
-        # decoder_ch (5F-5I): run the whole decoder at one fixed width, with 1x1
-        #   projections on the surviving skips. Most trainable parameters live in
-        #   up5+dec5 because c5=512/c4=256 dominate, so this is where the cuts
-        #   actually land. Stacks on half-depth, matching 5F ("identical to 5D
-        #   otherwise").
-        self.decoder_half_depth = bool(decoder_half_depth)
-        self.decoder_ch = decoder_ch
-        d = decoder_ch      # None => keep the original per-level widths
+        # ---- decoder --------------------------------------------------------
+        # skip_proj puts a 1x1 convolution on each skip before concatenation.
+        # The encoder is FROZEN ImageNet ResNet18, so the skips carry features
+        # optimised for natural-image classification and reach a histology
+        # decoder raw; a 1x1 is the cheapest adapter that lets the decoder
+        # reweight and recombine those frozen channels.
+        #
+        # Every projection is SQUARE, so each is initialised to the exact
+        # identity -- dirac_ weights, no bias. At initialisation this model IS
+        # the unprojected one, tensor for tensor; the projections leave identity
+        # only if training moves them. That is what makes it safe to enable
+        # without prior validation: the starting point is the known-good
+        # architecture. Cost is ~89k parameters, 2.8% on top of 3.23M.
+        self.skip_proj = bool(skip_proj)
 
-        if self.decoder_half_depth:
-            # Levels kept: /32 -> /16 -> /4 -> /1, so the surviving skips are s4
-            # and s2 -- the pair 5F names ("1x1 projections on the s4 and s2
-            # skips"). s3 and s1 are dropped, and the two later ConvTransposes
-            # upsample 4x to span the gap.
-            w5 = d if d else c4
-            self.up5 = nn.ConvTranspose2d(c5 + self.roi_ch, w5, kernel_size=2, stride=2)
-            self.skip4 = nn.Conv2d(c4, w5, 1) if d else nn.Identity()
-            self.dec5 = _double_conv(w5 + (d if d else c4) + skip_roi_ch, w5)
+        def _skip(ch):
+            if not self.skip_proj:
+                return nn.Identity()
+            # IDENTITY INITIALISED. dirac_ on a square 1x1 kernel writes a 1 on
+            # the diagonal and 0 everywhere else, and bias=False leaves no
+            # offset, so at step 0 this conv returns its input UNCHANGED --
+            # the skip is passed through exactly as nn.Identity() would.
+            conv = nn.Conv2d(ch, ch, kernel_size=1, bias=False)
+            nn.init.dirac_(conv.weight)
+            return conv
 
-            w3 = d if d else c2
-            self.up3 = nn.ConvTranspose2d(w5, w3, kernel_size=4, stride=4)
-            self.skip2 = nn.Conv2d(c2, w3, 1) if d else nn.Identity()
-            self.dec3 = _double_conv(w3 + (d if d else c2) + skip_roi_ch, w3)
+        # Each ConvTranspose emits the channel count of the skip it is about to
+        # concatenate with, so `2 * cN` below is that upsampled tensor plus the
+        # skip, not a widened level.
+        self.up5   = nn.ConvTranspose2d(c5 + self.roi_ch, c4, kernel_size=2, stride=2)
+        self.skip4 = _skip(c4)
+        self.dec5  = _double_conv(2 * c4, c4)
 
-            w1 = d if d else c1
-            self.up1 = nn.ConvTranspose2d(w3, w1, kernel_size=4, stride=4)
-            self.dec1 = _double_conv(w1 + skip_roi_ch, w1)
-            head_in = w1
-        else:
-            w5, w4, w3, w2, w1 = (d, d, d, d, d) if d else (c4, c3, c2, c1, c1)
-            self.up5  = nn.ConvTranspose2d(c5 + self.roi_ch, w5, kernel_size=2, stride=2)
-            self.skip4 = nn.Conv2d(c4, w5, 1) if d else nn.Identity()
-            self.dec5 = _double_conv(w5 + w5 + skip_roi_ch, w5)
-            self.up4  = nn.ConvTranspose2d(w5, w4, kernel_size=2, stride=2)
-            self.skip3 = nn.Conv2d(c3, w4, 1) if d else nn.Identity()
-            self.dec4 = _double_conv(w4 + w4 + skip_roi_ch, w4)
-            self.up3  = nn.ConvTranspose2d(w4, w3, kernel_size=2, stride=2)
-            self.skip2 = nn.Conv2d(c2, w3, 1) if d else nn.Identity()
-            self.dec3 = _double_conv(w3 + w3 + skip_roi_ch, w3)
-            self.up2  = nn.ConvTranspose2d(w3, w2, kernel_size=2, stride=2)
-            self.skip1 = nn.Conv2d(c1, w2, 1) if d else nn.Identity()
-            self.dec2 = _double_conv(w2 + w2 + skip_roi_ch, w2)
-            self.up1  = nn.ConvTranspose2d(w2, w1, kernel_size=2, stride=2)
-            self.dec1 = _double_conv(w1 + skip_roi_ch, w1)
-            head_in = w1
+        self.up4   = nn.ConvTranspose2d(c4, c3, kernel_size=2, stride=2)
+        self.skip3 = _skip(c3)
+        self.dec4  = _double_conv(2 * c3, c3)
 
-        self.head = nn.Conv2d(head_in, num_classes, kernel_size=1)
+        self.up3   = nn.ConvTranspose2d(c3, c2, kernel_size=2, stride=2)
+        self.skip2 = _skip(c2)
+        self.dec3  = _double_conv(2 * c2, c2)
+
+        self.up2   = nn.ConvTranspose2d(c2, c1, kernel_size=2, stride=2)
+        self.skip1 = _skip(c1)
+        self.dec2  = _double_conv(2 * c1, c1)
+
+        # up1 reaches full resolution, where there is no encoder skip, so dec1
+        # is the one level whose input is not doubled.
+        self.up1  = nn.ConvTranspose2d(c1, c1, kernel_size=2, stride=2)
+        self.dec1 = _double_conv(c1, c1)
+
+        self.head = nn.Conv2d(c1, num_classes, kernel_size=1)
 
     def forward(self, local, pos, roi=None):
         # pos is unused when use_roi=False: it exists to locate the ROI crop.
         s1, s2, s3, s4, x = self.backbone(local)
 
-        inject_skips = self.use_roi and self.roi_inject == 'skips'
         if self.use_roi:
             assert roi is not None, "use_roi=True but no roi tensor was passed to forward()"
 
         def roi_at(h, w):
-            # crop the per-image ROI to this tile (pos) and resample to (h, w)
-            return _crop_and_resize(roi, pos, h, w, mode=self.roi_interp)
+            """Exact ROI crop for each tile, no resampling.
+
+            The pipeline is built so one ROI pixel maps to one bottleneck cell:
+            a tile_size tile covers tile_size/tiling_size of the slide, so it
+            spans roi_dim * tile_size / tiling_size ROI pixels, and the encoder
+            reduces the same tile to tile_size/32 cells. At tiling 8192 with a
+            512 tile and a 256 ROI both are 16, so the crop is already the
+            bottleneck's size and any resample would be identity in shape while
+            still blurring a binary mask through interpolation. Slicing instead
+            keeps the ROI exactly {0, 1}.
+
+            The assert is the guard on that symmetry: change tiling_size, tile
+            size or ROI resolution without adjusting the others and it fires
+            here rather than silently degrading the prior.
+            """
+            B, C, H, W = roi.shape
+            y0 = (pos[:, 0] * H).round().long()
+            x0 = (pos[:, 1] * W).round().long()
+            y1 = (pos[:, 2] * H).round().long()
+            x1 = (pos[:, 3] * W).round().long()
+            assert torch.all(y1 - y0 == h) and torch.all(x1 - x0 == w), (
+                f"ROI crop is {(y1 - y0).unique().tolist()}x{(x1 - x0).unique().tolist()} "
+                f"but the target is {h}x{w}. The ROI/tile/bottleneck symmetry is "
+                f"broken: with tile_size T, tiling_size S and an R-pixel ROI, "
+                f"R*T/S must equal T/32."
+            )
+            ar = torch.arange(B, device=roi.device)
+            iy = y0.view(B, 1) + torch.arange(h, device=roi.device).view(1, h)
+            ix = x0.view(B, 1) + torch.arange(w, device=roi.device).view(1, w)
+            # (B, h, w, C) from broadcast advanced indexing, then back to (B, C, h, w)
+            return roi[ar.view(B, 1, 1), :, iy.view(B, h, 1), ix.view(B, 1, w)].permute(0, 3, 1, 2)
 
         if self.use_roi:
             x = torch.cat([x, roi_at(*x.shape[2:])], dim=1)
 
         def fuse(up, skip):
-            parts = [up, skip]
-            if inject_skips:
-                parts.append(roi_at(*up.shape[2:]))
-            return torch.cat(parts, dim=1)
+            return torch.cat([up, skip], dim=1)
 
-        if self.decoder_half_depth:
-            # s3 and s1 are deliberately unused: half-depth keeps every other skip
-            x = self.dec5(fuse(self.up5(x), self.skip4(s4)))
-            x = self.bot_drop(x)
-            x = self.dec3(fuse(self.up3(x), self.skip2(s2)))
-        else:
-            x = self.dec5(fuse(self.up5(x), self.skip4(s4)))
-            x = self.bot_drop(x)
-            x = self.dec4(fuse(self.up4(x), self.skip3(s3)))
-            x = self.dec3(fuse(self.up3(x), self.skip2(s2)))
-            x = self.dec2(fuse(self.up2(x), self.skip1(s1)))
-        u1 = self.up1(x)
-        if inject_skips:
-            u1 = torch.cat([u1, roi_at(*u1.shape[2:])], dim=1)
-        x = self.dec1(u1)
+        x = self.dec5(fuse(self.up5(x), self.skip4(s4)))
+        x = self.bot_drop(x)
+        x = self.dec4(fuse(self.up4(x), self.skip3(s3)))
+        x = self.dec3(fuse(self.up3(x), self.skip2(s2)))
+        x = self.dec2(fuse(self.up2(x), self.skip1(s1)))
+        x = self.dec1(self.up1(x))
 
         return self.head(x)

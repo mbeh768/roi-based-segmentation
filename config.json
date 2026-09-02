@@ -11,7 +11,8 @@
             "backbone_pretrained": true,
             "freeze_local_encoder": true,
             "use_roi": true,
-            "roi_ch": 1
+            "roi_ch": 1,
+            "skip_proj": true
         }
     },
     "data_loader": {
@@ -26,7 +27,6 @@
             "vflip": 0.5,
             "rot90": 0.75,
             "require_roi": true,
-            "roi_jitter": 0.0,
             "roi_exclusion": true,
             "roi_exclusion_radius": 0.0,
             "n_val_cases": 3
