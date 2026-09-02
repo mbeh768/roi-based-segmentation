@@ -130,3 +130,5 @@ figures-for-pub
 downstream-quantification
 kfold_results
 old-figures
+roi-ablation/configs
+roi-ablation/results
