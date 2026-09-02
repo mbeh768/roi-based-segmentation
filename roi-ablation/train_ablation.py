@@ -24,10 +24,12 @@ restates what tile selection already implies -- the discarded tiles contain no
 ventricle at all, so removing the filter buries the signal in guaranteed-empty
 background. Run it with --arms noise if that changes.
 
-The baseline is the existing flagship LOCO run, which is `noise_guided` with a
-real ROI. Compare against its TILE-level test IoU (0.9190 +- 0.0759 across the
-14 folds), which is what test_results.json records here; the 0.9243 headline is
-the slide-level stitched number and is not like-for-like.
+The baseline is a flagship LOCO run with a real ROI, and it must be one
+regenerated AFTER the metric change: model/metric.py's iou now reduces per image
+before averaging, where it previously pooled the whole batch, so any tile-level
+figure from an earlier run was batch-size dependent and is not comparable. Note
+also that test_results.json records TILE-level IoU, while the headline number in
+the paper is the slide-level stitched one -- do not compare across the two.
 
 Usage:
     python roi-ablation/train_ablation.py                    # noise_guided, 14 folds
