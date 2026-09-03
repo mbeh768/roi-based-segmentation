@@ -136,3 +136,5 @@ roi-ablation/results
 
 # intermediate planning documents
 repo-cleanup
+# local ROI staging helper (machine-specific archive path)
+utils/copy_rois.sh
