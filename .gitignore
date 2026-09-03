@@ -126,14 +126,6 @@ datasets/
 .idea/
 __MACOSX/
 
-# declutter - scope restricted to relevant experiments
-figures-for-pub
-downstream-quantification
-kfold_results
-old-figures
-roi-ablation/configs
-roi-ablation/results
-
 # intermediate planning documents
 repo-cleanup
 # local ROI staging helper (machine-specific archive path)
