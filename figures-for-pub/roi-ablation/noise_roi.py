@@ -43,7 +43,9 @@ import sys
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# the repo root is the directory holding train.py, at whatever depth
+sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents
+                            if (p / 'train.py').exists())))
 
 from data_loader.datasets import LocalGlobalDataset          # noqa: E402
 from data_loader.data_loaders import LocalGlobalDataLoader    # noqa: E402

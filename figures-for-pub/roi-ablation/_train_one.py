@@ -1,29 +1,27 @@
-"""Train ONE fold of ONE ROI-ablation arm.
+"""Drop-in replacement for train.py that runs the ROI ablation.
 
-Invoked as a subprocess by train_ablation.py; not normally run by hand. It makes
-the two changes to the repo's training entry point that a config file cannot
-express, without editing any file in the repo:
+Used as run_kfold.sh's TRAIN_ENTRY, so the ablation reuses the same runner,
+preflight, skip logic and summary as the baseline k-fold. It accepts exactly
+train.py's arguments and makes the two changes a config file cannot express,
+without editing anything in the repo:
 
-  1. registers NoiseROIDataLoader into data_loader.data_loaders, so a config can
-     name it exactly the way it names LocalGlobalDataLoader;
+  1. registers NoiseROIDataLoader into data_loader.data_loaders, so the config
+     can name it the way it names LocalGlobalDataLoader;
   2. attaches the ROI weight probe to up5 once the Trainer has built the model.
 
 Both are done by rebinding names train.py has already imported, so train.main()
-runs verbatim afterwards. Everything else -- optimiser, schedule, early stopping,
-the LOCO split, the post-training held-out test evaluation -- is inherited from
-the flagship config unchanged, so the arms differ from it only in the ROI.
-
-The `noise` arm sees more tiles per epoch than `noise_guided` because dropping
-roi_exclusion drops the tile filter. That is the experiment, not a confound: the
-ROI's contribution includes deciding which tiles exist. Both arms stop on
-val_loss convergence and report a val-selected best checkpoint.
+runs verbatim afterwards. Optimiser, schedule, early stopping, the LOCO split
+and the held-out test evaluation are all inherited unchanged, so the arm differs
+from its baseline only in the ROI the model is shown.
 """
 import argparse
+import collections
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
+# the repo root is the directory holding train.py, at whatever depth
+ROOT = next(p for p in HERE.parents if (p / 'train.py').exists())
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
@@ -54,8 +52,8 @@ def _patch_trainer(probe_every, probe_hist_every):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='one fold of one ROI-ablation arm')
-    ap.add_argument('-c', '--config', required=True, type=str)
+    ap = argparse.ArgumentParser(description='ROI ablation, one fold')
+    ap.add_argument('-c', '--config', default='config.json', type=str)
     ap.add_argument('-r', '--resume', default=None, type=str)
     ap.add_argument('-d', '--device', default=None, type=str)
     ap.add_argument('--probe-every', default=1, type=int)
@@ -65,9 +63,34 @@ def main():
     register()
     _patch_trainer(known.probe_every, known.probe_hist_every)
 
-    # from_args wants the parser itself, not the parsed namespace. The two probe
-    # flags are already consumed above and are ignored by ConfigParser.
-    config = ConfigParser.from_args(ap, [])
+    # MUST mirror train.py's CustomArgs. ConfigParser only applies overrides it
+    # is told about, so passing [] here would make --fold, --n_folds and --name
+    # silently no-ops: every fold would train fold 0 and write to the same run
+    # directory, with nothing in the logs to say so.
+    #
+    # --loader_type is the extra one, and it is what keeps this arm tied to its
+    # baseline: it takes the BASELINE config.json and swaps only the loader
+    # class, so the two cannot drift apart when lr, batch size, skip_proj or
+    # anything else is retuned.
+    CustomArgs = collections.namedtuple('CustomArgs', 'flags type target')
+    options = [
+        CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
+        CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;batch_size'),
+        CustomArgs(['--seed'], type=int, target='data_loader;args;split_seed'),
+        CustomArgs(['--fold'], type=int, target='data_loader;args;fold'),
+        CustomArgs(['--n_folds'], type=int, target='data_loader;args;n_folds'),
+        CustomArgs(['--data_dir'], type=str, target='data_loader;args;data_dir'),
+        CustomArgs(['--name'], type=str, target='name'),
+        CustomArgs(['--epochs'], type=int, target='trainer;epochs'),
+        CustomArgs(['--early_stop'], type=int, target='trainer;early_stop'),
+        CustomArgs(['--loader_type'], type=str, target='data_loader;type'),
+    ]
+    # from_args registers every option flag with default=None, so the swap has
+    # to arrive as a real argument rather than a default.
+    if '--loader_type' not in sys.argv:
+        sys.argv += ['--loader_type', 'NoiseROIDataLoader']
+
+    config = ConfigParser.from_args(ap, options)
     train_mod.main(config)
 
 

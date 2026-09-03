@@ -13,6 +13,10 @@
 #                path.                                        Default: python
 #   DEVICE       CUDA_VISIBLE_DEVICES value.                       Default: 0
 #   CONFIG       config file.                             Default: config.json
+#   TRAIN_ENTRY  training entry point. Must accept train.py's arguments.
+#                The ROI ablation points this at its own _train_one.py, which
+#                registers a custom data loader and attaches the weight probe
+#                before calling train.main().                Default: train.py
 #   FOLDS        "0-13", or a list like "0,3,7".               Default: 0-13
 #   N_FOLDS      folds to split the cases into.                    Default: 14
 #   NAME_PREFIX  run name stem; each fold gets -fNN appended.
@@ -23,12 +27,14 @@
 #   EARLY_STOP   override the config's trainer.early_stop.
 #   MIN_FREE_MB  VRAM required before launching.               Default: 24000
 #   FORCE        1 to launch despite insufficient free VRAM.
-#   DETACH       1 to run under `setsid nohup` and return immediately.
 #
 # Usage:
 #   PY=/abs/path/to/env/bin/python bash run_kfold.sh
-#   PY=... DETACH=1 bash run_kfold.sh
 #   PY=... FOLDS=0,1,2 bash run_kfold.sh
+#
+# To run detached, use the shell rather than a flag in here. setsid makes it a
+# process-group leader, which is what the kill recipe below relies on:
+#   PY=... setsid nohup bash run_kfold.sh > kfold.log 2>&1 &
 #
 # Folds that already wrote test_results.json are skipped, so re-running after
 # an interruption resumes rather than restarting. An interrupted fold has no
@@ -46,6 +52,7 @@ set -euo pipefail
 PY="${PY:-python}"
 DEVICE="${DEVICE:-0}"
 CONFIG="${CONFIG:-config.json}"
+TRAIN_ENTRY="${TRAIN_ENTRY:-train.py}"
 FOLDS="${FOLDS:-0-13}"
 N_FOLDS="${N_FOLDS:-14}"
 NAME_PREFIX="${NAME_PREFIX:-}"
@@ -55,9 +62,13 @@ EPOCHS="${EPOCHS:-}"
 EARLY_STOP="${EARLY_STOP:-}"
 MIN_FREE_MB="${MIN_FREE_MB:-24000}"
 FORCE="${FORCE:-0}"
-DETACH="${DETACH:-0}"
 
+# Walk up from this script to the repo root (the directory holding train.py)
+# rather than assuming a fixed depth, so the script survives being moved.
+# train.py resolves the config's data_dir and save_dir relative to the working
+# directory, so everything below must run from there.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+while [ ! -f "$ROOT/train.py" ] && [ "$ROOT" != "/" ]; do ROOT="$(dirname "$ROOT")"; done
 cd "$ROOT"
 
 # --- preflight ------------------------------------------------------------
@@ -66,6 +77,7 @@ cd "$ROOT"
 
 [ -f train.py ] || { echo "ERROR: no train.py in $ROOT -- not a repo root" >&2; exit 1; }
 [ -f "$CONFIG" ] || { echo "ERROR: CONFIG=$CONFIG does not exist" >&2; exit 1; }
+[ -f "$TRAIN_ENTRY" ] || { echo "ERROR: TRAIN_ENTRY=$TRAIN_ENTRY does not exist" >&2; exit 1; }
 
 command -v "$PY" >/dev/null 2>&1 || [ -x "$PY" ] || {
     echo "ERROR: PY=$PY is not executable." >&2
@@ -172,7 +184,7 @@ run_all() {
             continue
         fi
 
-        local args=(train.py -c "$CONFIG" --n_folds "$N_FOLDS" --fold "$f" --name "$fname")
+        local args=("$TRAIN_ENTRY" -c "$CONFIG" --n_folds "$N_FOLDS" --fold "$f" --name "$fname")
         [ -n "$DATA_DIR" ]   && args+=(--data_dir "$DATA_DIR")
         [ -n "$BATCH_SIZE" ] && args+=(--bs "$BATCH_SIZE")
         [ -n "$EPOCHS" ]     && args+=(--epochs "$EPOCHS")
@@ -218,12 +230,4 @@ PYEOF
 }
 
 echo "logs: $ROOT/kfold_logs/"
-if [ "$DETACH" = "1" ]; then
-    # setsid makes this a process-group leader so the whole tree can be killed
-    # with one signal later (see the header).
-    LOG="kfold_logs/kfold_${STAMP}.log"
-    setsid nohup bash -c "$(declare -f run_all); run_all" > "$LOG" 2>&1 < /dev/null &
-    echo "detached, pid $!  --  tail -f $ROOT/$LOG"
-else
-    run_all
-fi
+run_all
