@@ -112,6 +112,12 @@ def main():
     ap.add_argument('--models-dir', default=str(ROOT / 'saved' / 'models'))
     ap.add_argument('--batch-size', type=int, default=8)
     ap.add_argument('--device', default='cuda')
+    ap.add_argument('--loader-module', default=None,
+                    help='path to a module exposing register(), for runs whose config '
+                         'names a loader class that does not live in '
+                         'data_loader.data_loaders -- e.g. an ablation: '
+                         'figures-for-pub/roi-ablation/noise_roi.py. The model must be '
+                         'evaluated through the loader it was TRAINED with.')
     ap.add_argument('--outdir', required=True,
                     help="experiment folder to write <name>_slide_iou.json into, "
                          "e.g. figures-for-pub/baseline. Required so results land "
@@ -123,6 +129,16 @@ def main():
     runs = [d for d in runs if (d / 'model_best.pth').exists() and (d / 'config.json').exists()]
     if not runs:
         raise SystemExit(f'no runs with a checkpoint under {a.models_dir}/{a.name}-f*')
+    if a.loader_module:
+        import importlib.util
+        p = Path(a.loader_module).resolve()
+        sys.path.insert(0, str(p.parent))
+        spec = importlib.util.spec_from_file_location(p.stem, p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.register()
+        print(f'registered loaders from {p.name}')
+
     device = torch.device(a.device)
     print(f'{len(runs)} folds\n')
 
@@ -133,7 +149,13 @@ def main():
         # deterministic evaluation: augmentation off, workers off, no shuffling
         args.update(hflip=0.0, vflip=0.0, rot90=0.0, shuffle=False, num_workers=0,
                     batch_size=a.batch_size)
-        loader = getattr(module_data, cfg['data_loader']['type'])(**args)
+        loader_cls = getattr(module_data, cfg['data_loader']['type'], None)
+        if loader_cls is None:
+            raise SystemExit(
+                f"{d.name}'s config names data loader '{cfg['data_loader']['type']}', which "
+                f"is not in data_loader.data_loaders. If it comes from an ablation, pass "
+                f"--loader-module pointing at the module that registers it.")
+        loader = loader_cls(**args)
         ds, idxs = loader.dataset, list(loader.test_indices)
         assert not ds.augment, 'augmentation still on -- the eval would be noisy'
 
