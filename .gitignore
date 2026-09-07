@@ -115,7 +115,7 @@ ENV/
 data/
 input/
 saved/
-datasets/
+datasets/s
 
 # large intermediate raster files (prob maps, masks) -- too big for git
 *.tif
@@ -131,3 +131,6 @@ repo-cleanup
 
 # local ROI staging helper (machine-specific archive path)
 utils/copy_rois.sh
+
+# large images
+figures-for-pub/qualitative/canvases/
