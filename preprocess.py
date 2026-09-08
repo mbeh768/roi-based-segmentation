@@ -169,15 +169,15 @@ class Preprocessor:
 
         return data                                        # CHW original dtype
 
-    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None, imagenet_norm=False, scene_index=0):
+    def load_and_format(self, path, interpolation, standardize=True, is_mask=False, target_size=None, scene_index=0):
         '''
         Load an image or mask, resize to a square, normalize to float32 [0, 1],
-        optionally standardize channels per-channel, zero-pad to square.
+        optionally z-score each channel per slide, zero-pad to square.
 
         Args:
             path (str|Path): path to image or mask file
             interpolation: cv2 interpolation flag for resizing
-            standardize (bool): if True, apply per-channel min-max stretching
+            standardize (bool): if True, z-score each channel over its non-zero pixels
             is_mask (bool): if True, use tifffile loader (preserves label values)
             target_size (int|None): override for output square size;
                                     defaults to config['preprocess']['global_downsample']
@@ -266,17 +266,13 @@ class Preprocessor:
                       f"{np.unique(image)[:6]} -- thresholded at >0.5")
             image = binary
 
-        if standardize:
+        if standardize and not is_mask:
+            # per-slide per-channel z-score; >0 excludes background and pad, which are exactly 0
             for c in range(image.shape[0]):
-                ch_min = image[c].min()
-                ch_max = image[c].max()
-                if ch_max > ch_min:
-                    image[c] = (image[c] - ch_min) / (ch_max - ch_min)
-
-        if imagenet_norm and not is_mask:
-            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
-            std  = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
-            image = (image - mean) / std
+                signal = image[c] > 0
+                if not signal.any():
+                    continue
+                image[c] = (image[c] - image[c][signal].mean()) / max(float(image[c][signal].std()), 1e-6)
 
         return image    # (C, H, W) float32
 
@@ -459,12 +455,10 @@ if __name__ == '__main__':
 
         # --- global ---
         logger.info(f"[WORKING]\tglobal image...")
-        imagenet_norm = config['preprocess'].get('imagenet_norm', False)
         standardize = config['preprocess'].get('standardize', True)
         collapse = config['preprocess'].get('collapse', False)
         image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
-                                  standardize=standardize, imagenet_norm=imagenet_norm,
-                                  scene_index=scene_idx)
+                                  standardize=standardize, scene_index=scene_idx)
         if collapse:
             image = p.collapse_channels(image)
         image_vis = p.save_global(image, clean_stem, 'images', dry_run=args.dry_run)
@@ -473,8 +467,8 @@ if __name__ == '__main__':
         mask_vis = None
         if mask_path is not None:
             logger.info(f"[WORKING]\tglobal mask...")
-            mask = p.load_and_format(mask_path, cv2.INTER_NEAREST, standardize=False, is_mask=True,
-                                     scene_index=scene_idx)
+            mask = p.load_and_format(mask_path, cv2.INTER_NEAREST, standardize=False,
+                                     is_mask=True, scene_index=scene_idx)
             mask_vis = p.save_global(mask, clean_stem, 'masks', dry_run=args.dry_run)
             logger.info(f"[COMPLETE]\tglobal mask  shape={mask.shape}")
 
@@ -498,8 +492,8 @@ if __name__ == '__main__':
 
         logger.info(f"[WORKING]\tlocal image tiles...")
         image_local = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
-                                        target_size=tiling_size, standardize=standardize,
-                                        imagenet_norm=imagenet_norm, scene_index=scene_idx)
+                                        target_size=tiling_size,
+                                        standardize=standardize, scene_index=scene_idx)
         if collapse:
             image_local = p.collapse_channels(image_local)
         n = p.save_local(image_local, clean_stem, 'images', dry_run=args.dry_run)
@@ -507,9 +501,9 @@ if __name__ == '__main__':
 
         if mask_path is not None:
             logger.info(f"[WORKING]\tlocal mask tiles...")
-            mask_local = p.load_and_format(mask_path, cv2.INTER_NEAREST,
-                                           standardize=False, is_mask=True,
-                                           target_size=tiling_size, scene_index=scene_idx)
+            mask_local = p.load_and_format(mask_path, cv2.INTER_NEAREST, standardize=False,
+                                           is_mask=True, target_size=tiling_size,
+                                           scene_index=scene_idx)
             n = p.save_local(mask_local, clean_stem, 'masks', dry_run=args.dry_run)
             logger.info(f"[COMPLETE]\tlocal mask  {n} patches")
 

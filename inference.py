@@ -44,10 +44,8 @@ def tif_to_tensor(path, config, is_mask=False, scene_index=0):
     """Load a TIFF and return a (C, H, W) float32 tensor via the preprocess pipeline."""
     p = Preprocessor(config)
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
-    imagenet_norm = config['preprocess'].get('imagenet_norm', False) if not is_mask else False
     arr = p.load_and_format(path, interp, standardize=not is_mask,
-                            is_mask=is_mask, imagenet_norm=imagenet_norm,
-                            scene_index=scene_index)
+                            is_mask=is_mask, scene_index=scene_index)
     if not is_mask and config['preprocess'].get('collapse', False):
         arr = p.collapse_channels(arr)
     return torch.from_numpy(arr)
@@ -71,10 +69,9 @@ def tif_to_tiles(path, p, is_mask=False, scene_index=0):
     tiling_size  = p.c['preprocess']['tiling_size']
 
     interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
-    imagenet_norm = p.c['preprocess'].get('imagenet_norm', False)
     arr = p.load_and_format(path, interp, standardize=not is_mask,
                             is_mask=is_mask, target_size=tiling_size,
-                            imagenet_norm=imagenet_norm, scene_index=scene_index)
+                            scene_index=scene_index)
     if not is_mask and p.c['preprocess'].get('collapse', False):
         arr = p.collapse_channels(arr)
 

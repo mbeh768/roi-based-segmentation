@@ -59,7 +59,6 @@
         "tile_size": 512,
         "stride": 256,
         "standardize": true,
-        "imagenet_norm": false,
         "collapse": true
     },
     "trainer": {
