@@ -133,4 +133,4 @@ repo-cleanup
 utils/copy_rois.sh
 
 # large images
-figures-for-pub/qualitative/canvases/
+**/canvases/

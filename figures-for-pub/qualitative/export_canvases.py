@@ -159,7 +159,28 @@ def main():
     ap.add_argument('--reference', default=str(ROOT / 'figures-for-pub' / 'baseline'
                                                / 'k-fold-baseline_slide_iou.json'),
                     help='slide-level JSON to cross-check the recomputed IoU against')
+    ap.add_argument('--loader-module', default=None,
+                    help='path to a module exposing register(), for runs whose config '
+                         'names a loader outside data_loader.data_loaders -- an '
+                         'ablation must be evaluated through the loader it was '
+                         'TRAINED with, e.g. figures-for-pub/roi-ablation/noise_roi.py')
+    ap.add_argument('--loader-kwargs', default='{}',
+                    help='JSON merged into the loader args, for arguments the config '
+                         'does not carry. The noise loader redraws its ROI on every '
+                         'access, so pass {"noise_seed": 0} to make the figure '
+                         'reproducible rather than one arbitrary draw.')
     a = ap.parse_args()
+
+    if a.loader_module:
+        import importlib.util
+        p = Path(a.loader_module).resolve()
+        sys.path.insert(0, str(p.parent))
+        spec = importlib.util.spec_from_file_location(p.stem, p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.register()
+        print(f'registered loaders from {p.name}')
+    loader_kwargs = json.loads(a.loader_kwargs)
 
     wanted = set(a.slides)
     outdir = Path(a.outdir)
@@ -183,7 +204,15 @@ def main():
         args = {k: v for k, v in cfg['data_loader']['args'].items()
                 if k not in EVAL_CONTROLLED}
         args.update(shuffle=False, num_workers=0, batch_size=a.batch_size)
-        loader = getattr(module_data, cfg['data_loader']['type'])(**args)
+        args.update(loader_kwargs)
+        loader_cls = getattr(module_data, cfg['data_loader']['type'], None)
+        if loader_cls is None:
+            raise SystemExit(
+                f"{d.name}'s config names data loader '{cfg['data_loader']['type']}', "
+                f"which is not in data_loader.data_loaders. If it comes from an "
+                f"ablation, pass --loader-module pointing at the module that "
+                f"registers it.")
+        loader = loader_cls(**args)
         ds, idxs = loader.dataset, list(loader.test_indices)
         assert not ds.augment, 'augmentation still on -- the export would be noisy'
 
