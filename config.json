@@ -58,7 +58,6 @@
         "tiling_size": 8192,
         "tile_size": 512,
         "stride": 256,
-        "standardize": true,
         "collapse": true
     },
     "trainer": {

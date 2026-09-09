@@ -174,6 +174,9 @@ class Preprocessor:
         Load an image or mask, resize to a square, normalize to float32 [0, 1],
         zero-pad to square.
 
+        The dtype scaling below is the only normalization applied to the input;
+        everything after it is handled by the encoder's BatchNorm.
+
         Args:
             path (str|Path): path to image or mask file
             interpolation: cv2 interpolation flag for resizing
@@ -266,21 +269,6 @@ class Preprocessor:
             image = binary
 
         return image    # (C, H, W) float32
-
-    def standardize_signal(self, image):
-        '''Z-score each channel of a (C, H, W) array over its non-zero pixels.
-
-        Applied AFTER collapse, so the single channel the model consumes has
-        signal mean 0 and std 1 exactly; z-scoring the three channels first and
-        averaging them shrinks the std below 1, because they are correlated.
-        Background and the square zero-pad are exactly 0, so >0 selects signal
-        without a threshold or a tissue detector.
-        '''
-        for c in range(image.shape[0]):
-            signal = image[c] > 0
-            if signal.any():
-                image[c] = (image[c] - image[c][signal].mean()) / max(float(image[c][signal].std()), 1e-6)
-        return image
 
     def collapse_channels(self, image):
         '''Collapse a (C, H, W) float32 array to (1, H, W) by averaging across channels.'''
@@ -461,14 +449,11 @@ if __name__ == '__main__':
 
         # --- global ---
         logger.info(f"[WORKING]\tglobal image...")
-        standardize = config['preprocess'].get('standardize', True)
         collapse = config['preprocess'].get('collapse', False)
         image = p.load_and_format(image_path, cv2.INTER_LINEAR, is_mask=False,
                                   scene_index=scene_idx)
         if collapse:
             image = p.collapse_channels(image)
-        if standardize:
-            image = p.standardize_signal(image)
         image_vis = p.save_global(image, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tglobal image  shape={image.shape}")
 
@@ -503,8 +488,6 @@ if __name__ == '__main__':
                                         target_size=tiling_size, scene_index=scene_idx)
         if collapse:
             image_local = p.collapse_channels(image_local)
-        if standardize:
-            image_local = p.standardize_signal(image_local)
         n = p.save_local(image_local, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tlocal image  {n} patches")
 

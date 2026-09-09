@@ -134,3 +134,6 @@ utils/copy_rois.sh
 
 # large images
 **/canvases/
+
+# experiments archive
+experiments-archive

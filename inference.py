@@ -47,8 +47,6 @@ def tif_to_tensor(path, config, is_mask=False, scene_index=0):
     arr = p.load_and_format(path, interp, is_mask=is_mask, scene_index=scene_index)
     if not is_mask and config['preprocess'].get('collapse', False):
         arr = p.collapse_channels(arr)
-    if not is_mask and config['preprocess'].get('standardize', True):
-        arr = p.standardize_signal(arr)
     return torch.from_numpy(arr)
 
 
@@ -74,8 +72,6 @@ def tif_to_tiles(path, p, is_mask=False, scene_index=0):
                             scene_index=scene_index)
     if not is_mask and p.c['preprocess'].get('collapse', False):
         arr = p.collapse_channels(arr)
-    if not is_mask and p.c['preprocess'].get('standardize', True):
-        arr = p.standardize_signal(arr)
 
     img_hwc = np.transpose(arr, (1, 2, 0))
     H, W = img_hwc.shape[:2]
