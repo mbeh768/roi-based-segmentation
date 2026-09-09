@@ -88,7 +88,6 @@ class ImageNetPretrainedLocalUNet(BaseModel):
             frozen_stages = list(freeze_local_encoder)
         else:
             frozen_stages = []
-        self._frozen_modules = []
         for s in frozen_stages:
             if s not in self._STAGE_MODULES:
                 raise ValueError(
@@ -102,7 +101,6 @@ class ImageNetPretrainedLocalUNet(BaseModel):
                     )
                 for p in getattr(self.backbone, mod_name).parameters():
                     p.requires_grad = False
-                self._frozen_modules.append(mod_name)
 
         self.bot_drop = nn.Dropout2d(bottleneck_dropout)
 
@@ -157,29 +155,6 @@ class ImageNetPretrainedLocalUNet(BaseModel):
         self.dec1 = _double_conv(c1, c1)
 
         self.head = nn.Conv2d(c1, num_classes, kernel_size=1)
-
-        # A frozen stage must also stay in EVAL mode. requires_grad=False stops
-        # the weights moving, but BatchNorm's running_mean/running_var are
-        # buffers rather than parameters, so they keep updating on every
-        # training forward and the "frozen" encoder drifts off its pretrained
-        # normalisation. Last line of __init__ so it covers every submodule;
-        # train() re-applies it, since nn.Module.train() recurses into children.
-        self.train(self.training)
-
-    def train(self, mode=True):
-        """Train mode for the model, but frozen encoder stages held in eval.
-
-        This overrides nn.Module.train because that is the only way to
-        intercept it: the trainer calls model.train() each epoch and it
-        recurses into every child, so a one-off backbone.eval() in __init__
-        would be undone immediately. Only the stages named in
-        freeze_local_encoder are held, so partial freezing still trains the
-        BatchNorms of the stages left unfrozen.
-        """
-        super().train(mode)
-        for mod_name in self._frozen_modules:
-            getattr(self.backbone, mod_name).eval()
-        return self
 
     def forward(self, local, pos, roi=None):
         # pos is unused when use_roi=False: it exists to locate the ROI crop.
