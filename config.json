@@ -27,6 +27,7 @@
             "vflip": 0.5,
             "rot90": 0.75,
             "require_roi": true,
+            "gt_roi": true,
             "roi_exclusion": true,
             "roi_exclusion_radius": 0.0,
             "n_val_cases": 3

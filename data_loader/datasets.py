@@ -70,7 +70,7 @@ class LocalGlobalDataset(Dataset):
     directly from disk by annotate_globals.py and the trainer's split previews.
     """
     def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0,
-                 require_roi=False,
+                 require_roi=False, gt_roi=False,
                  roi_exclusion=False, roi_exclusion_radius=0.05):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
@@ -78,14 +78,19 @@ class LocalGlobalDataset(Dataset):
         self.aug_flags = {'hflip': hflip, 'vflip': vflip, 'rot90': rot90}
         self.augment = any(v > 0 for v in self.aug_flags.values())
         self.require_roi = require_roi
+        self.gt_roi = gt_roi
         self.roi_exclusion = roi_exclusion
         self.roi_exclusion_radius = roi_exclusion_radius
+        # Stems that must use the annotator ROI even when gt_roi is on. The loader
+        # fills this with the fold's TEST stems once the split is known.
+        self.disk_roi_stems = set()
 
         # Photometric — applied to local only (add blur, erasure, etc. here)
         self.photo_transform = None
 
         self.items = []
         self.stem_to_roi = {}
+        self.stem_to_gt_roi = {}
         for coords_file in sorted(self.image_dir.glob('*/coordinates.json')):
             stem = coords_file.parent.name
             with open(coords_file) as f:
@@ -103,6 +108,16 @@ class LocalGlobalDataset(Dataset):
                         f"Run annotate_globals.py --data-dir {data_dir}."
                     )
                 self.stem_to_roi[stem] = roi_path
+            if self.gt_roi:
+                # global_downsample equals the ROI side, so the downsampled mask
+                # IS a GT-derived ROI already on disk -- nothing to generate.
+                gt_path = self.mask_dir / stem / 'global.pt'
+                if not gt_path.exists():
+                    raise FileNotFoundError(
+                        f"gt_roi=True but missing downsampled mask for stem '{stem}': "
+                        f"{gt_path}. Re-run preprocess.py."
+                    )
+                self.stem_to_gt_roi[stem] = gt_path
 
         assert len(self.items) > 0, f"No patches found via coordinates.json in {self.image_dir}"
 
@@ -172,7 +187,13 @@ class LocalGlobalDataset(Dataset):
 
         roi = None
         if self.require_roi:
-            roi = torch.load(self.stem_to_roi[stem], weights_only=True)
+            # gt_roi feeds the downsampled ground truth as the ROI, but NEVER for a
+            # stem in disk_roi_stems -- those are the fold's held-out slides, which
+            # must see the annotator ROI or the reported score is measured with the
+            # label in the model's input.
+            use_gt = self.gt_roi and stem not in self.disk_roi_stems
+            src = self.stem_to_gt_roi if use_gt else self.stem_to_roi
+            roi = torch.load(src[stem], weights_only=True)
 
         if self.augment:
             if roi is not None:

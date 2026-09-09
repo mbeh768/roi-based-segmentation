@@ -35,12 +35,12 @@ class LocalGlobalDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle=True, validation_split=0.0,
                  num_workers=1,
                  hflip=0.0, vflip=0.0, rot90=0.0,
-                 require_roi=False,
+                 require_roi=False, gt_roi=False,
                  roi_exclusion=False, roi_exclusion_radius=0.05,
                  split_seed=0, n_folds=0, fold=0, n_val_cases=0):
         self.dataset = self._make_dataset(
             data_dir, hflip=hflip, vflip=vflip, rot90=rot90,
-            require_roi=require_roi,
+            require_roi=require_roi, gt_roi=gt_roi,
             roi_exclusion=roi_exclusion, roi_exclusion_radius=roi_exclusion_radius,
         )
         self._batch_size = batch_size
@@ -130,6 +130,10 @@ class LocalGlobalDataLoader(BaseDataLoader):
             self.split_cases = {'train': list(train_cases),
                                 'val': list(val_cases),
                                 'test': list(test_cases)}
+            # The held-out slides keep the annotator ROI even under gt_roi, so the
+            # reported score is never measured with the label in the input.
+            self.dataset.disk_roi_stems = {self.dataset.items[i][1]
+                                           for i in self.test_indices}
         else:
             n_val = split if isinstance(split, int) else max(1, int(len(cases) * split))
             val_cases   = cases[:n_val]
