@@ -32,11 +32,13 @@ Two corrections are what make it slide-level rather than a re-average:
             but it is noise on a reported number. Everything here runs with
             augmentation OFF.
 
-Scope. Only tiles that survived roi_exclusion are forwarded, so the canvas
-covers the ROI-adjacent region rather than the whole slide; covered_frac
-records how much. Pixels no tile covered are excluded from both intersection
-and union rather than counted as correct background, which would inflate the
-score by the area of empty slide.
+Scope. Only tiles that survived roi_exclusion are forwarded, so the model only
+ever predicts over the ROI-adjacent region -- but the SCORE is taken over the
+whole image. Ground truth the tile filter dropped is charged as a miss, which is
+what makes a foreground-filtering failure visible instead of silently excluded;
+gt_outside_covered reports it per slide. Masking to coverage would not have
+guarded against inflation anyway: a region where prediction and ground truth are
+both empty adds nothing to either the intersection or the union.
 
 Usage:
     python utils/slide_level_iou.py --name k-fold-baseline \
@@ -83,14 +85,21 @@ def score_native(pred, covered, stem, raw_dir):
     oh, ow = round(H * s), round(W * s)
     up = lambda m: cv2.resize(m[:oh, :ow].astype(np.uint8), (W, H),
                               interpolation=cv2.INTER_NEAREST) > 0
-    cov_n = up(covered)
-    pred_n = up(pred) & cov_n
-    gt &= cov_n
+    pred_n = up(pred)
 
+    # Scored over the WHOLE image, not just the tile-covered region. Masking to
+    # coverage would hide ground truth that roi_exclusion dropped -- those pixels
+    # are real misses and have to be charged as such. It never protected against
+    # inflation either: a region where both masks are empty adds nothing to the
+    # intersection or the union, so it cannot move an IoU.
     inter = int(np.count_nonzero(pred_n & gt))
     union = int(np.count_nonzero(pred_n | gt))
+    cov_n = up(covered)
     out = {'iou': inter / union if union else float('nan'),
            'covered_frac': float(cov_n.mean()),
+           # foreground the tile filter never gave the model a chance at: a
+           # non-zero value here is a roi_exclusion failure, not a model error
+           'gt_outside_covered': int(np.count_nonzero(gt & ~cov_n)),
            'gt_px': int(np.count_nonzero(gt)),
            'pred_px': int(np.count_nonzero(pred_n)),
            'native_hw': [int(H), int(W)]}
