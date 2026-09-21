@@ -7,9 +7,16 @@ test_results.json, and the two are not comparable:
                 held-out tiles. A tile is a 512px window, so this asks "how
                 good is the average window" and never reconstructs the slide.
 
-  slide IoU     one IoU per slide, over the stitched prediction. This asks
-                "how good is the segmentation of this specimen", which is what
-                a reader of the paper cares about.
+  slide IoU     one IoU per slide, over the stitched prediction, scored at the
+                SOURCE TIFF's own resolution. This asks "how good is the
+                segmentation of this specimen", which is what a reader of the
+                paper cares about.
+
+Ground truth comes from <stem>_mask.* in raw_image_directory, never from the
+stitched tile masks. Scoring against the preprocessed label would compare two
+arrays that went through the same resize, so part of the error cancels and the
+number flatters itself; the claim is about the actual slide. --canvas-gt keeps
+the old tile-mask behaviour for reproducing earlier JSONs only.
 
 Two corrections are what make it slide-level rather than a re-average:
 
@@ -41,7 +48,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import cv2
 import numpy as np
+import tifffile
 import torch
 
 # the repo root is the directory holding train.py, at whatever depth
@@ -52,7 +61,44 @@ import data_loader.data_loaders as module_data   # noqa: E402
 import model.model as module_arch                # noqa: E402
 
 
-def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size):
+def score_native(pred, covered, stem, raw_dir):
+    """Score a stitched canvas against the SOURCE mask TIFF at its own resolution.
+
+    preprocess.py resized native (H, W) so the longest side is `canvas` with aspect
+    preserved, then zero-padded bottom-right to a square, so the inverse is exact:
+    crop to (out_h, out_w) and resize back to (H, W). Nearest everywhere, because
+    both are label masks and interpolation would invent boundary values.
+    """
+    hits = sorted(Path(raw_dir).glob(f'*/{stem}_mask.*'))
+    if not hits:
+        raise SystemExit(f'no source mask for {stem} under {raw_dir}')
+    gt = tifffile.TiffFile(hits[0]).series[0].asarray()
+    if gt.ndim == 3:
+        gt = gt[..., 0] if gt.shape[-1] <= 4 else gt[0]
+    gt = gt > 127                       # matches preprocess.py's >0.5 after /255
+    H, W = gt.shape
+
+    canvas = pred.shape[0]
+    s = canvas / max(H, W)
+    oh, ow = round(H * s), round(W * s)
+    up = lambda m: cv2.resize(m[:oh, :ow].astype(np.uint8), (W, H),
+                              interpolation=cv2.INTER_NEAREST) > 0
+    cov_n = up(covered)
+    pred_n = up(pred) & cov_n
+    gt &= cov_n
+
+    inter = int(np.count_nonzero(pred_n & gt))
+    union = int(np.count_nonzero(pred_n | gt))
+    out = {'iou': inter / union if union else float('nan'),
+           'covered_frac': float(cov_n.mean()),
+           'gt_px': int(np.count_nonzero(gt)),
+           'pred_px': int(np.count_nonzero(pred_n)),
+           'native_hw': [int(H), int(W)]}
+    return inter, union, out
+
+
+def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size,
+                raw_dir=None):
     """Accumulate predictions onto per-slide canvases and score each slide."""
     from torch.utils.data.dataloader import default_collate
 
@@ -88,17 +134,19 @@ def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size):
         count = np.maximum(c['n'], 1)
         # average the overlapping predictions, THEN threshold once
         pred = (c['p'] / count > 0.5) & covered
-        gt = (c['g'] / count > 0.5) & covered
-        inter = int(np.count_nonzero(pred & gt))
-        union = int(np.count_nonzero(pred | gt))
+        if raw_dir is not None:
+            inter, union, rec = score_native(pred, covered, stem, raw_dir)
+        else:
+            gt = (c['g'] / count > 0.5) & covered
+            inter = int(np.count_nonzero(pred & gt))
+            union = int(np.count_nonzero(pred | gt))
+            rec = {'iou': inter / union if union else float('nan'),
+                   'covered_frac': float(covered.mean()),
+                   'gt_px': int(np.count_nonzero(gt)),
+                   'pred_px': int(np.count_nonzero(pred))}
         inter_all += inter
         union_all += union
-        per_slide[stem] = {
-            'iou': inter / union if union else float('nan'),
-            'covered_frac': float(covered.mean()),
-            'gt_px': int(np.count_nonzero(gt)),
-            'pred_px': int(np.count_nonzero(pred)),
-        }
+        per_slide[stem] = rec
     # case-level IoU pools the halves of a paired case onto one score, which is
     # the unit the split holds out
     case_iou = inter_all / union_all if union_all else float('nan')
@@ -118,6 +166,14 @@ def main():
                          'data_loader.data_loaders -- e.g. an ablation: '
                          'figures-for-pub/roi-ablation/noise_roi.py. The model must be '
                          'evaluated through the loader it was TRAINED with.')
+    ap.add_argument('--canvas-gt', action='store_true',
+                    help='score against the stitched TILE masks on the tiling canvas '
+                         'instead of the source mask TIFF. Only for reproducing older '
+                         'JSONs -- reported metrics are native-resolution.')
+    ap.add_argument('--raw-dir',
+                    default=json.loads((ROOT / 'config.json').read_text())
+                    ['preprocess']['raw_image_directory'],
+                    help='source TIFFs, holding <stem>_mask.* for native-resolution GT')
     ap.add_argument('--outdir', required=True,
                     help="experiment folder to write <name>_slide_iou.json into, "
                          "e.g. figures-for-pub/baseline. Required so results land "
@@ -167,7 +223,8 @@ def main():
         amp = bool(cfg['trainer'].get('amp', False))
         amp_dtype = getattr(torch, cfg['trainer'].get('amp_dtype', 'bfloat16'))
         case_iou, per_slide = stitch_fold(model, ds, idxs, device, amp, amp_dtype,
-                                          a.batch_size)
+                                          a.batch_size,
+                                          raw_dir=None if a.canvas_gt else a.raw_dir)
 
         tile_iou = json.loads((d / 'test_results.json').read_text()).get('test_iou') \
             if (d / 'test_results.json').exists() else None
