@@ -63,6 +63,13 @@ import data_loader.data_loaders as module_data   # noqa: E402
 import model.model as module_arch                # noqa: E402
 
 
+def metrics(inter, n_pred, n_gt):
+    """IoU and Dice from one intersection and the two areas."""
+    union = n_pred + n_gt - inter
+    return {'iou': inter / union if union else float('nan'),
+            'dice': 2 * inter / (n_pred + n_gt) if (n_pred + n_gt) else float('nan')}
+
+
 def score_native(pred, covered, stem, raw_dir):
     """Score a stitched canvas against the SOURCE mask TIFF at its own resolution.
 
@@ -93,17 +100,17 @@ def score_native(pred, covered, stem, raw_dir):
     # inflation either: a region where both masks are empty adds nothing to the
     # intersection or the union, so it cannot move an IoU.
     inter = int(np.count_nonzero(pred_n & gt))
-    union = int(np.count_nonzero(pred_n | gt))
+    n_gt, n_pred = int(np.count_nonzero(gt)), int(np.count_nonzero(pred_n))
     cov_n = up(covered)
-    out = {'iou': inter / union if union else float('nan'),
+    out = {**metrics(inter, n_pred, n_gt),
            'covered_frac': float(cov_n.mean()),
            # foreground the tile filter never gave the model a chance at: a
            # non-zero value here is a roi_exclusion failure, not a model error
            'gt_outside_covered': int(np.count_nonzero(gt & ~cov_n)),
-           'gt_px': int(np.count_nonzero(gt)),
-           'pred_px': int(np.count_nonzero(pred_n)),
+           'gt_px': n_gt,
+           'pred_px': n_pred,
            'native_hw': [int(H), int(W)]}
-    return inter, union, out
+    return inter, n_pred, n_gt, out
 
 
 def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size,
@@ -137,29 +144,28 @@ def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size,
                 c['g'][y:y + h, x:x + w] += gt[k]
                 c['n'][y:y + h, x:x + w] += 1
 
-    per_slide, inter_all, union_all = {}, 0, 0
+    per_slide, inter_all, pred_all, gt_all = {}, 0, 0, 0
     for stem, c in canvas.items():
         covered = c['n'] > 0
         count = np.maximum(c['n'], 1)
         # average the overlapping predictions, THEN threshold once
         pred = (c['p'] / count > 0.5) & covered
         if raw_dir is not None:
-            inter, union, rec = score_native(pred, covered, stem, raw_dir)
+            inter, n_pred, n_gt, rec = score_native(pred, covered, stem, raw_dir)
         else:
             gt = (c['g'] / count > 0.5) & covered
             inter = int(np.count_nonzero(pred & gt))
-            union = int(np.count_nonzero(pred | gt))
-            rec = {'iou': inter / union if union else float('nan'),
+            n_gt, n_pred = int(np.count_nonzero(gt)), int(np.count_nonzero(pred))
+            rec = {**metrics(inter, n_pred, n_gt),
                    'covered_frac': float(covered.mean()),
-                   'gt_px': int(np.count_nonzero(gt)),
-                   'pred_px': int(np.count_nonzero(pred))}
+                   'gt_px': n_gt, 'pred_px': n_pred}
         inter_all += inter
-        union_all += union
+        pred_all += n_pred
+        gt_all += n_gt
         per_slide[stem] = rec
-    # case-level IoU pools the halves of a paired case onto one score, which is
-    # the unit the split holds out
-    case_iou = inter_all / union_all if union_all else float('nan')
-    return case_iou, per_slide
+    # case level pools the halves of a paired case onto one score, which is the
+    # unit the split holds out
+    return metrics(inter_all, pred_all, gt_all), per_slide
 
 
 def main():
@@ -231,27 +237,32 @@ def main():
 
         amp = bool(cfg['trainer'].get('amp', False))
         amp_dtype = getattr(torch, cfg['trainer'].get('amp_dtype', 'bfloat16'))
-        case_iou, per_slide = stitch_fold(model, ds, idxs, device, amp, amp_dtype,
-                                          a.batch_size,
-                                          raw_dir=None if a.canvas_gt else a.raw_dir)
+        case, per_slide = stitch_fold(model, ds, idxs, device, amp, amp_dtype,
+                                      a.batch_size,
+                                      raw_dir=None if a.canvas_gt else a.raw_dir)
 
         tile_iou = json.loads((d / 'test_results.json').read_text()).get('test_iou') \
             if (d / 'test_results.json').exists() else None
         results.append({'run': d.name, 'case': loader.split_cases.get('test'),
-                        'slide_iou_case': case_iou, 'per_slide': per_slide,
+                        'slide_iou_case': case['iou'], 'slide_dice_case': case['dice'],
+                        'per_slide': per_slide,
                         'tile_iou_reported': tile_iou, 'n_test_tiles': len(idxs),
                         'best_epoch': state.get('epoch')})
         cov = np.mean([v['covered_frac'] for v in per_slide.values()])
-        print(f"  {d.name:<28} slide {case_iou:.4f}   tile {tile_iou if tile_iou is None else f'{tile_iou:.4f}'}"
+        print(f"  {d.name:<28} iou {case['iou']:.4f}  dice {case['dice']:.4f}"
+              f"   tile {tile_iou if tile_iou is None else f'{tile_iou:.4f}'}"
               f"   covered {cov*100:.1f}%   {len(idxs)} tiles")
         del model
         if device.type == 'cuda':
             torch.cuda.empty_cache()
 
     v = np.array([r['slide_iou_case'] for r in results])
+    w = np.array([r['slide_dice_case'] for r in results])
     t = np.array([r['tile_iou_reported'] for r in results if r['tile_iou_reported'] is not None])
     print(f"\nslide-level IoU  mean {v.mean():.4f}  sd {v.std(ddof=1):.4f}  "
           f"min {v.min():.4f}  max {v.max():.4f}  n={len(v)}")
+    print(f"slide-level Dice mean {w.mean():.4f}  sd {w.std(ddof=1):.4f}  "
+          f"min {w.min():.4f}  max {w.max():.4f}  n={len(w)}")
     if len(t):
         print(f"tile-level IoU   mean {t.mean():.4f}  sd {t.std(ddof=1):.4f}  (for contrast; "
               f"different quantity, not comparable)")
