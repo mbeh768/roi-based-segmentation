@@ -6,14 +6,16 @@
       "case": [
         "AJKV056-7"
       ],
-      "slide_iou_case": 0.6107431182326039,
+      "slide_iou_case": 0.610571647276014,
+      "slide_dice_case": 0.7582048874493522,
       "per_slide": {
         "AJKV056-7": {
-          "iou": 0.6107431182326039,
+          "iou": 0.610571647276014,
+          "dice": 0.7582048874493522,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 55439526,
-          "pred_px": 52990825,
+          "pred_px": 52966958,
           "native_hw": [
             20264,
             23816
@@ -29,14 +31,16 @@
       "case": [
         "21PControl_4"
       ],
-      "slide_iou_case": 0.5383467777655069,
+      "slide_iou_case": 0.5380137190990695,
+      "slide_dice_case": 0.6996214824588491,
       "per_slide": {
         "21PControl_4": {
-          "iou": 0.5383467777655069,
+          "iou": 0.5380137190990695,
+          "dice": 0.6996214824588491,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 28805811,
-          "pred_px": 18498777,
+          "pred_px": 18490544,
           "native_hw": [
             15755,
             21272
@@ -52,14 +56,16 @@
       "case": [
         "21PControl-2"
       ],
-      "slide_iou_case": 0.2970357266989191,
+      "slide_iou_case": 0.29701437230601285,
+      "slide_dice_case": 0.4579970409702389,
       "per_slide": {
         "21PControl-2": {
-          "iou": 0.2970357266989191,
+          "iou": 0.29701437230601285,
+          "dice": 0.4579970409702389,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 25692824,
-          "pred_px": 8997320,
+          "pred_px": 8997601,
           "native_hw": [
             24147,
             33357
@@ -75,25 +81,28 @@
       "case": [
         "AJKY121-8"
       ],
-      "slide_iou_case": 0.5824690168907053,
+      "slide_iou_case": 0.5821564024484659,
+      "slide_dice_case": 0.7359024702583763,
       "per_slide": {
         "AJKY121-8-1": {
-          "iou": 0.5866342944584454,
+          "iou": 0.5857288634161005,
+          "dice": 0.7387503335901673,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 28703221,
-          "pred_px": 33290722,
+          "pred_px": 33326485,
           "native_hw": [
             26834,
             16126
           ]
         },
         "AJKY121-8-2": {
-          "iou": 0.5803184779302205,
+          "iou": 0.580309832283656,
+          "dice": 0.7344253897921631,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 65861137,
-          "pred_px": 53734042,
+          "pred_px": 53734328,
           "native_hw": [
             25639,
             16915
@@ -109,14 +118,16 @@
       "case": [
         "21PControl-1"
       ],
-      "slide_iou_case": 0.7383640434616735,
+      "slide_iou_case": 0.7386124235675596,
+      "slide_dice_case": 0.8496573630274169,
       "per_slide": {
         "21PControl-1": {
-          "iou": 0.7383640434616735,
+          "iou": 0.7386124235675596,
+          "dice": 0.8496573630274169,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 5681423,
-          "pred_px": 6516415,
+          "pred_px": 6513554,
           "native_hw": [
             18604,
             25973
@@ -132,25 +143,28 @@
       "case": [
         "FL_22P003-6"
       ],
-      "slide_iou_case": 0.3283726476724306,
+      "slide_iou_case": 0.3284140787577178,
+      "slide_dice_case": 0.49444534503102844,
       "per_slide": {
         "FL_22P003-6_1of2": {
-          "iou": 0.24991903517392933,
+          "iou": 0.25008874960790073,
+          "dice": 0.40011359143315683,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 26423018,
-          "pred_px": 25729740,
+          "pred_px": 25735845,
           "native_hw": [
             14829,
             21265
           ]
         },
         "FL_22P003-6_2of2": {
-          "iou": 0.4392349896221596,
+          "iou": 0.43913710701071756,
+          "dice": 0.6102783464778623,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 21820405,
-          "pred_px": 20676373,
+          "pred_px": 20656583,
           "native_hw": [
             16678,
             22186
@@ -166,14 +180,16 @@
       "case": [
         "AJKV056-8"
       ],
-      "slide_iou_case": 0.4125872822407512,
+      "slide_iou_case": 0.4126852805570804,
+      "slide_dice_case": 0.5842565024735609,
       "per_slide": {
         "AJKV056-8": {
-          "iou": 0.4125872822407512,
+          "iou": 0.4126852805570804,
+          "dice": 0.5842565024735609,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 19910906,
-          "pred_px": 33592822,
+          "pred_px": 33581007,
           "native_hw": [
             14835,
             22134
@@ -190,13 +206,15 @@
         "17P645-1"
       ],
       "slide_iou_case": 0.0,
+      "slide_dice_case": 0.0,
       "per_slide": {
         "17P645-1": {
           "iou": 0.0,
+          "dice": 0.0,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 31241294,
-          "pred_px": 68435386,
+          "pred_px": 68388654,
           "native_hw": [
             24130,
             35178
@@ -212,25 +230,28 @@
       "case": [
         "AJK056-10"
       ],
-      "slide_iou_case": 0.5183694912799244,
+      "slide_iou_case": 0.5184722887159157,
+      "slide_dice_case": 0.6828867310504003,
       "per_slide": {
         "AJK056-10-2of2": {
-          "iou": 0.6944494886366032,
+          "iou": 0.694429441372734,
+          "dice": 0.8196616801112064,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 29847390,
-          "pred_px": 34462797,
+          "pred_px": 34461865,
           "native_hw": [
             23713,
             14841
           ]
         },
         "AJKV056-10-1-of-2": {
-          "iou": 0.37216421383616016,
+          "iou": 0.3723457131146919,
+          "dice": 0.5426412740702365,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 29379259,
-          "pred_px": 33340475,
+          "pred_px": 33338602,
           "native_hw": [
             22131,
             14837
@@ -246,14 +267,16 @@
       "case": [
         "AJKY121-7-2"
       ],
-      "slide_iou_case": 0.5317723535017468,
+      "slide_iou_case": 0.5319986358562147,
+      "slide_dice_case": 0.6945158088328026,
       "per_slide": {
         "AJKY121-7-2": {
-          "iou": 0.5317723535017468,
+          "iou": 0.5319986358562147,
+          "dice": 0.6945158088328026,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 20077150,
-          "pred_px": 34930183,
+          "pred_px": 34911761,
           "native_hw": [
             14847,
             21936
@@ -269,25 +292,28 @@
       "case": [
         "21PControl-11"
       ],
-      "slide_iou_case": 0.39883124574747136,
+      "slide_iou_case": 0.3988583779159511,
+      "slide_dice_case": 0.5702627002315684,
       "per_slide": {
         "21PControl-11-1of2": {
-          "iou": 0.4008467176169901,
+          "iou": 0.4006636533415237,
+          "dice": 0.5721054478506267,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 234031690,
-          "pred_px": 140513211,
+          "pred_px": 140456588,
           "native_hw": [
             25975,
             35168
           ]
         },
         "21PControl-11-2of2": {
-          "iou": 0.3976692582006621,
+          "iou": 0.39781731875243476,
+          "dice": 0.5691978678694445,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 203737532,
-          "pred_px": 444438477,
+          "pred_px": 444333852,
           "native_hw": [
             33344,
             42535
@@ -303,14 +329,16 @@
       "case": [
         "17P391_7A"
       ],
-      "slide_iou_case": 9.885073886039074e-06,
+      "slide_iou_case": 9.885104847016326e-06,
+      "slide_dice_case": 1.977001426536881e-05,
       "per_slide": {
         "17P391_7A": {
-          "iou": 9.885073886039074e-06,
+          "iou": 9.885104847016326e-06,
+          "dice": 1.977001426536881e-05,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 55210712,
-          "pred_px": 24626,
+          "pred_px": 24453,
           "native_hw": [
             18473,
             23969
@@ -326,25 +354,28 @@
       "case": [
         "21PControl-9"
       ],
-      "slide_iou_case": 0.24213028125704347,
+      "slide_iou_case": 0.24218335807775304,
+      "slide_dice_case": 0.3899317383425996,
       "per_slide": {
         "21PControl-9-1of2": {
-          "iou": 0.5744497451206684,
+          "iou": 0.574458894017318,
+          "dice": 0.7297223143775506,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 56656824,
-          "pred_px": 87374078,
+          "pred_px": 87372347,
           "native_hw": [
             18514,
             23332
           ]
         },
         "21PControl-9-2of2": {
-          "iou": 0.15525738727725208,
+          "iou": 0.1553304459601784,
+          "dice": 0.268893538646574,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 280182758,
-          "pred_px": 124092461,
+          "pred_px": 124150379,
           "native_hw": [
             24136,
             37007
@@ -360,25 +391,28 @@
       "case": [
         "AJKY121-9"
       ],
-      "slide_iou_case": 0.645561539528653,
+      "slide_iou_case": 0.6452942283928689,
+      "slide_dice_case": 0.7844119516825818,
       "per_slide": {
         "AJKY121-9-1": {
-          "iou": 0.5290056053906321,
+          "iou": 0.5286230251951546,
+          "dice": 0.6916329487156153,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 52828963,
-          "pred_px": 46040206,
+          "pred_px": 46015764,
           "native_hw": [
             27485,
             18514
           ]
         },
         "AJKY121-9-2": {
-          "iou": 0.7564034100262103,
+          "iou": 0.756248836940093,
+          "dice": 0.8612092102594107,
           "covered_frac": 1.0,
           "gt_outside_covered": 0,
           "gt_px": 56269667,
-          "pred_px": 63158460,
+          "pred_px": 63144950,
           "native_hw": [
             25678,
             14840

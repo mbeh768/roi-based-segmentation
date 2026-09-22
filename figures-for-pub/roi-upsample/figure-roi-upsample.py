@@ -5,10 +5,12 @@ native resolution over the whole image. The diagonal is y = x, so a point above
 it means the network improved on its own ROI and the vertical distance is by how
 much.
 
-Written twice, as IoU and as Dice. Dice is what dice_loss optimises and is the
+Written twice, as IoU and as Dice, on IDENTICAL axes so the two panels are read
+against the same scale. Dice is what dice_loss optimises and is the
 convention in this literature, but it carries no extra information: for the same
-pair of sets Dice = 2*IoU/(1+IoU) exactly, so it is derived rather than
-recomputed, and the ranking, the sign of every delta and the improved-on-ROI
+pair of sets Dice = 2*IoU/(1+IoU) exactly -- both come from slide_level_iou.py's
+own pixel counts rather than one being derived from the other, but
+the ranking, the sign of every delta and the improved-on-ROI
 count are identical in both panels. Dice only compresses the scale toward 1.
 
 A scatter rather than a paired slope chart: twenty slope lines over three x
@@ -19,7 +21,7 @@ model handed a poor ROI should not be judged against the ceiling of a perfect
 one.
 
 Usage:
-    python figures-for-pub/roi-ceiling/figure_roi_vs_model.py
+    python figures-for-pub/roi-upsample/figure-roi-upsample.py
 """
 import argparse
 import json
@@ -41,31 +43,31 @@ SHOW_CASE_NAMES = False
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--data', default=str(HERE / 'roi_ceiling.json'))
+    ap.add_argument('--data', default=str(HERE / 'roi-upsample.json'))
     ap.add_argument('--outdir', default=str(HERE))
     ap.add_argument('--dpi', type=int, default=300)
     a = ap.parse_args()
 
     rows = json.loads(Path(a.data).read_text())['slides']
-    iou_roi = np.array([r['roi'] for r in rows])
-    iou_mod = np.array([r['model'] for r in rows])
-    dice = lambda x: 2 * x / (1 + x)
+    col = lambda k: np.array([r[k] for r in rows], float)
+    panels = (('IoU', col('roi'), col('model'), 'roi-upsample-iou.png'),
+              ('Dice', col('roi_dice'), col('model_dice'), 'roi-upsample-dice.png'))
 
-    for name, roi, mod, fname in (
-            ('IoU', iou_roi, iou_mod, 'roi-vs-model.png'),
-            ('Dice', dice(iou_roi), dice(iou_mod), 'roi-vs-model-dice.png')):
-        panel(name, roi, mod, rows, Path(a.outdir) / fname, a.dpi)
+    # one pair of limits for both panels, so the two are read against the same
+    # scale and Dice's compression toward 1 is visible rather than hidden by a
+    # re-zoomed axis
+    lo = min(min(r.min(), m.min()) for _, r, m, _ in panels)
+    lo = np.floor(lo * 20 - 0.5) / 20
+    for name, roi, mod, fname in panels:
+        panel(name, roi, mod, rows, Path(a.outdir) / fname, a.dpi, lo)
 
 
-def panel(name, roi, mod, rows, out, dpi):
+def panel(name, roi, mod, rows, out, dpi, lo):
 
     fig, ax = plt.subplots(figsize=(5.8, 5.8))
     fig.patch.set_facecolor(SURFACE)
     ax.set_facecolor(SURFACE)
 
-    # limits from the data, since Dice compresses everything toward 1 and a
-    # shared axis would leave its points crowded in a corner
-    lo = np.floor(min(roi.min(), mod.min()) * 20 - 0.5) / 20
     hi = 1.005
     ax.plot([lo, hi], [lo, hi], color=INK_MUTED, lw=1.0, alpha=0.7, zorder=1)
     mid = lo + 0.62 * (hi - lo)

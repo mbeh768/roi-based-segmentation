@@ -21,7 +21,7 @@ from tile coordinates alone -- tile CONTENTS never enter it, so no tensor is
 opened and no model is loaded. CPU only.
 
 Usage:
-    python figures-for-pub/roi-ceiling/roi_ceiling.py
+    python figures-for-pub/roi-upsample/roi-upsample.py
 """
 import argparse
 import json
@@ -54,7 +54,7 @@ def main():
     ap.add_argument('--model-json',
                     default=str(ROOT / 'figures-for-pub' / 'baseline'
                                 / 'k-fold-baseline-2026-09-02_slide_iou.json'))
-    ap.add_argument('--out', default=str(HERE / 'roi_ceiling.json'))
+    ap.add_argument('--out', default=str(HERE / 'roi-upsample.json'))
     a = ap.parse_args()
 
     cfg = json.loads(Path(a.config).read_text())
@@ -71,9 +71,9 @@ def main():
             covered[stem] = np.zeros((e['image_H'], e['image_W']), bool)
         covered[stem][e['y']:e['y'] + e['height'], e['x']:e['x'] + e['width']] = True
 
-    model_iou = {}
+    model = {}
     for f in json.loads(Path(a.model_json).read_text())['folds']:
-        model_iou.update({k: v['iou'] for k, v in f['per_slide'].items()})
+        model.update({k: (v['iou'], v['dice']) for k, v in f['per_slide'].items()})
 
     rows = []
     print(f"{'slide':<22}{'ceiling':>9}{'roi':>9}{'model':>9}   {'annot':>8}{'network':>9}")
@@ -82,14 +82,16 @@ def main():
         gt256 = torch.load(data_dir / 'masks' / stem / 'global.pt', weights_only=True)
         roi = torch.load(data_dir / 'images' / stem / f'roi_{stem}.pt', weights_only=True)
 
-        _, _, ceil_rec = score_native(to_canvas(gt256, cov.shape), cov, stem, raw_dir)
-        _, _, roi_rec = score_native(to_canvas(roi, cov.shape), cov, stem, raw_dir)
-        m = model_iou.get(stem, float('nan'))
-        rows.append({'stem': stem, 'ceiling': ceil_rec['iou'], 'roi': roi_rec['iou'],
-                     'model': m, 'native_hw': ceil_rec['native_hw'],
-                     'gt_px': ceil_rec['gt_px']})
-        print(f"{stem:<22}{ceil_rec['iou']:>9.4f}{roi_rec['iou']:>9.4f}{m:>9.4f}   "
-              f"{ceil_rec['iou'] - roi_rec['iou']:>8.4f}{m - roi_rec['iou']:>9.4f}")
+        *_, ceil_rec = score_native(to_canvas(gt256, cov.shape), cov, stem, raw_dir)
+        *_, roi_rec = score_native(to_canvas(roi, cov.shape), cov, stem, raw_dir)
+        m_iou, m_dice = model.get(stem, (float('nan'), float('nan')))
+        rows.append({'stem': stem,
+                     'ceiling': ceil_rec['iou'], 'ceiling_dice': ceil_rec['dice'],
+                     'roi': roi_rec['iou'], 'roi_dice': roi_rec['dice'],
+                     'model': m_iou, 'model_dice': m_dice,
+                     'native_hw': ceil_rec['native_hw'], 'gt_px': ceil_rec['gt_px']})
+        print(f"{stem:<22}{ceil_rec['iou']:>9.4f}{roi_rec['iou']:>9.4f}{m_iou:>9.4f}   "
+              f"{ceil_rec['iou'] - roi_rec['iou']:>8.4f}{m_iou - roi_rec['iou']:>9.4f}")
 
     Path(a.out).write_text(json.dumps({'slides': rows}, indent=2))
     col = lambda k: np.array([r[k] for r in rows], float)

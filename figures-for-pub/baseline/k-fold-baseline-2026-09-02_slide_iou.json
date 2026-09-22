@@ -7,9 +7,11 @@
         "AJKV056-7"
       ],
       "slide_iou_case": 0.9022577683987638,
+      "slide_dice_case": 0.948617777661378,
       "per_slide": {
         "AJKV056-7": {
           "iou": 0.9022577683987638,
+          "dice": 0.948617777661378,
           "covered_frac": 0.4350175330083608,
           "gt_outside_covered": 0,
           "gt_px": 55439526,
@@ -30,9 +32,11 @@
         "21PControl_4"
       ],
       "slide_iou_case": 0.9703977551721811,
+      "slide_dice_case": 0.9849765131176612,
       "per_slide": {
         "21PControl_4": {
           "iou": 0.9703977551721811,
+          "dice": 0.9849765131176612,
           "covered_frac": 0.27560546273805997,
           "gt_outside_covered": 0,
           "gt_px": 28805811,
@@ -53,9 +57,11 @@
         "21PControl-2"
       ],
       "slide_iou_case": 0.950013891552855,
+      "slide_dice_case": 0.9743662808435998,
       "per_slide": {
         "21PControl-2": {
           "iou": 0.950013891552855,
+          "dice": 0.9743662808435998,
           "covered_frac": 0.11601604580216303,
           "gt_outside_covered": 0,
           "gt_px": 25692824,
@@ -76,9 +82,11 @@
         "AJKY121-8"
       ],
       "slide_iou_case": 0.9379257461405689,
+      "slide_dice_case": 0.9679687139803712,
       "per_slide": {
         "AJKY121-8-1": {
           "iou": 0.932459013540302,
+          "dice": 0.9650492010508613,
           "covered_frac": 0.29574837404156584,
           "gt_outside_covered": 0,
           "gt_px": 28703221,
@@ -90,6 +98,7 @@
         },
         "AJKY121-8-2": {
           "iou": 0.940341336246837,
+          "dice": 0.9692535212033572,
           "covered_frac": 0.4475173604928209,
           "gt_outside_covered": 0,
           "gt_px": 65861137,
@@ -110,9 +119,11 @@
         "21PControl-1"
       ],
       "slide_iou_case": 0.9180398345400733,
+      "slide_dice_case": 0.9572687886956321,
       "per_slide": {
         "21PControl-1": {
           "iou": 0.9180398345400733,
+          "dice": 0.9572687886956321,
           "covered_frac": 0.06817281798756615,
           "gt_outside_covered": 0,
           "gt_px": 5681423,
@@ -133,9 +144,11 @@
         "FL_22P003-6"
       ],
       "slide_iou_case": 0.8974606248656423,
+      "slide_dice_case": 0.9459596822244369,
       "per_slide": {
         "FL_22P003-6_1of2": {
           "iou": 0.9016104058714308,
+          "dice": 0.9482598571059664,
           "covered_frac": 0.3010671272381313,
           "gt_outside_covered": 0,
           "gt_px": 26423018,
@@ -147,6 +160,7 @@
         },
         "FL_22P003-6_2of2": {
           "iou": 0.8923583959895497,
+          "dice": 0.9431177496617059,
           "covered_frac": 0.2273341227937958,
           "gt_outside_covered": 16963,
           "gt_px": 21820405,
@@ -167,9 +181,11 @@
         "AJKV056-8"
       ],
       "slide_iou_case": 0.9245065014658048,
+      "slide_dice_case": 0.9607725417000694,
       "per_slide": {
         "AJKV056-8": {
           "iou": 0.9245065014658048,
+          "dice": 0.9607725417000694,
           "covered_frac": 0.2714029682673378,
           "gt_outside_covered": 0,
           "gt_px": 19910906,
@@ -190,9 +206,11 @@
         "17P645-1"
       ],
       "slide_iou_case": 0.8689744186671733,
+      "slide_dice_case": 0.9298943955443407,
       "per_slide": {
         "17P645-1": {
           "iou": 0.8689744186671733,
+          "dice": 0.9298943955443407,
           "covered_frac": 0.11531895912133042,
           "gt_outside_covered": 0,
           "gt_px": 31241294,
@@ -213,9 +231,11 @@
         "AJK056-10"
       ],
       "slide_iou_case": 0.9214167936622497,
+      "slide_dice_case": 0.9591014263032596,
       "per_slide": {
         "AJK056-10-2of2": {
           "iou": 0.9180859972634975,
+          "dice": 0.9572938841880041,
           "covered_frac": 0.44466363057910757,
           "gt_outside_covered": 10046,
           "gt_px": 29847390,
@@ -227,6 +247,7 @@
         },
         "AJKV056-10-1-of-2": {
           "iou": 0.9248362415187517,
+          "dice": 0.9609505697887619,
           "covered_frac": 0.2680139804997445,
           "gt_outside_covered": 0,
           "gt_px": 29379259,
@@ -247,9 +268,11 @@
         "AJKY121-7-2"
       ],
       "slide_iou_case": 0.8851286486879512,
+      "slide_dice_case": 0.9390644498496168,
       "per_slide": {
         "AJKY121-7-2": {
           "iou": 0.8851286486879512,
+          "dice": 0.9390644498496168,
           "covered_frac": 0.42415344697288465,
           "gt_outside_covered": 0,
           "gt_px": 20077150,
@@ -270,9 +293,11 @@
         "21PControl-11"
       ],
       "slide_iou_case": 0.9658567933524557,
+      "slide_dice_case": 0.9826318952819963,
       "per_slide": {
         "21PControl-11-1of2": {
           "iou": 0.9762683029933499,
+          "dice": 0.9879916623817196,
           "covered_frac": 0.5090062560153994,
           "gt_outside_covered": 0,
           "gt_px": 234031690,
@@ -284,6 +309,7 @@
         },
         "21PControl-11-2of2": {
           "iou": 0.9539898208999004,
+          "dice": 0.9764532145418701,
           "covered_frac": 0.28402422897412927,
           "gt_outside_covered": 0,
           "gt_px": 203737532,
@@ -304,9 +330,11 @@
         "17P391_7A"
       ],
       "slide_iou_case": 0.9876856855041111,
+      "slide_dice_case": 0.9938046972991277,
       "per_slide": {
         "17P391_7A": {
           "iou": 0.9876856855041111,
+          "dice": 0.9938046972991277,
           "covered_frac": 0.23566182357782428,
           "gt_outside_covered": 0,
           "gt_px": 55210712,
@@ -327,9 +355,11 @@
         "21PControl-9"
       ],
       "slide_iou_case": 0.9905486266335909,
+      "slide_dice_case": 0.9952518751664996,
       "per_slide": {
         "21PControl-9-1of2": {
           "iou": 0.9828967877743288,
+          "dice": 0.991374633147261,
           "covered_frac": 0.31136804632173215,
           "gt_outside_covered": 0,
           "gt_px": 56656824,
@@ -341,6 +371,7 @@
         },
         "21PControl-9-2of2": {
           "iou": 0.9921019695512912,
+          "dice": 0.9960353282264522,
           "covered_frac": 0.5075912200774277,
           "gt_outside_covered": 0,
           "gt_px": 280182758,
@@ -361,9 +392,11 @@
         "AJKY121-9"
       ],
       "slide_iou_case": 0.9447119450303614,
+      "slide_dice_case": 0.9715700543152804,
       "per_slide": {
         "AJKY121-9-1": {
           "iou": 0.937444704684986,
+          "dice": 0.9677124744960476,
           "covered_frac": 0.3291196535673096,
           "gt_outside_covered": 0,
           "gt_px": 52828963,
@@ -375,6 +408,7 @@
         },
         "AJKY121-9-2": {
           "iou": 0.95144986046474,
+          "dice": 0.9751209905420283,
           "covered_frac": 0.5381320737921793,
           "gt_outside_covered": 0,
           "gt_px": 56269667,
