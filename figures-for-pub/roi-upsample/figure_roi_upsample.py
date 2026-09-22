@@ -8,7 +8,7 @@ much.
 Written twice, as IoU and as Dice, on IDENTICAL axes so the two panels are read
 against the same scale. Dice is what dice_loss optimises and is the
 convention in this literature, but it carries no extra information: for the same
-pair of sets Dice = 2*IoU/(1+IoU) exactly -- both come from slide_level_iou.py's
+pair of sets Dice = 2*IoU/(1+IoU) exactly -- both come from slide_level_metrics.py's
 own pixel counts rather than one being derived from the other, but
 the ranking, the sign of every delta and the improved-on-ROI
 count are identical in both panels. Dice only compresses the scale toward 1.
@@ -21,7 +21,7 @@ model handed a poor ROI should not be judged against the ceiling of a perfect
 one.
 
 Usage:
-    python figures-for-pub/roi-upsample/figure-roi-upsample.py
+    python figures-for-pub/roi-upsample/figure_roi_upsample.py
 """
 import argparse
 import json

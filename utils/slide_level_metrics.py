@@ -1,4 +1,4 @@
-"""Slide-level held-out IoU for a leave-one-case-out sweep.
+"""Slide-level held-out IoU and Dice for a leave-one-case-out sweep.
 
 This is the number the paper reports. It is NOT the test_iou in
 test_results.json, and the two are not comparable:
@@ -41,7 +41,7 @@ guarded against inflation anyway: a region where prediction and ground truth are
 both empty adds nothing to either the intersection or the union.
 
 Usage:
-    python utils/slide_level_iou.py --name k-fold-baseline \
+    python utils/slide_level_metrics.py --name k-fold-baseline \
         --outdir figures-for-pub/baseline
 """
 import argparse
@@ -169,7 +169,7 @@ def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size,
 
 
 def main():
-    ap = argparse.ArgumentParser(description='slide-level held-out IoU per fold')
+    ap = argparse.ArgumentParser(description='slide-level held-out IoU and Dice per fold')
     ap.add_argument('--name', required=True,
                     help='run name stem, e.g. k-fold-baseline (folds are <name>-fNN)')
     ap.add_argument('--models-dir', default=str(ROOT / 'saved' / 'models'))
@@ -190,7 +190,7 @@ def main():
                     ['preprocess']['raw_image_directory'],
                     help='source TIFFs, holding <stem>_mask.* for native-resolution GT')
     ap.add_argument('--outdir', required=True,
-                    help="experiment folder to write <name>_slide_iou.json into, "
+                    help="experiment folder to write <name>_slide_metrics.json into, "
                          "e.g. figures-for-pub/baseline. Required so results land "
                          "with the experiment that produced them rather than "
                          "beside this script.")
@@ -269,7 +269,7 @@ def main():
 
     outdir = Path(a.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    out = outdir / f'{a.name}_slide_iou.json'
+    out = outdir / f'{a.name}_slide_metrics.json'
     out.write_text(json.dumps({'name': a.name, 'folds': results}, indent=2))
     print(f'\nwrote {out}')
 

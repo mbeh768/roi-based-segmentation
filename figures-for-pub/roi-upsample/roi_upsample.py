@@ -1,7 +1,7 @@
 """How much of the slide-level score is the ROI, and how much is the network?
 
 Three quantities per slide, all at NATIVE TIFF resolution over the whole image,
-scored by slide_level_iou.py's own score_native so they are directly comparable
+scored by slide_level_metrics.py's own score_native so they are directly comparable
 to the reported model metric:
 
   ceiling   masks/<stem>/global.pt upsampled to native. The downsampled GT is a
@@ -11,7 +11,7 @@ to the reported model metric:
   roi       roi_<stem>.pt upsampled to native. The drawn ROI alone, with no
             network: the floor a model given that ROI must beat to be doing
             real work.
-  model     read from the fold sweep's <name>_slide_iou.json.
+  model     read from the fold sweep's <name>_slide_metrics.json.
 
 ceiling -> roi is annotation error; roi -> model is the network's contribution.
 Reporting roi without ceiling would charge resolution loss to the annotator.
@@ -21,7 +21,7 @@ from tile coordinates alone -- tile CONTENTS never enter it, so no tensor is
 opened and no model is loaded. CPU only.
 
 Usage:
-    python figures-for-pub/roi-upsample/roi-upsample.py
+    python figures-for-pub/roi-upsample/roi_upsample.py
 """
 import argparse
 import json
@@ -38,7 +38,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'utils'))
 
 import data_loader.data_loaders as module_data     # noqa: E402
-from slide_level_iou import score_native           # noqa: E402
+from slide_level_metrics import score_native       # noqa: E402
 
 
 def to_canvas(t, shape):
@@ -53,7 +53,7 @@ def main():
     ap.add_argument('--config', default=str(ROOT / 'config.json'))
     ap.add_argument('--model-json',
                     default=str(ROOT / 'figures-for-pub' / 'baseline'
-                                / 'k-fold-baseline-2026-09-02_slide_iou.json'))
+                                / 'k-fold-baseline-2026-09-02_slide_metrics.json'))
     ap.add_argument('--out', default=str(HERE / 'roi-upsample.json'))
     a = ap.parse_args()
 

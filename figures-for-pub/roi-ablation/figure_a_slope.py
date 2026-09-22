@@ -53,8 +53,9 @@ def load(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--baseline', default=str(ROOT / 'figures-for-pub' / 'baseline'
-                                              / 'k-fold-baseline_slide_iou.json'))
-    ap.add_argument('--ablation', default=str(HERE / 'roi-ablation-noise_slide_iou.json'))
+                                              / 'k-fold-baseline-2026-09-02_slide_metrics.json'))
+    ap.add_argument('--ablation', default=str(
+        HERE / 'roi-ablation-noise-2026-09-03_slide_metrics.json'))
     ap.add_argument('--out', default=str(HERE / 'noise-ablate.png'))
     ap.add_argument('--dpi', type=int, default=300)
     a = ap.parse_args()
