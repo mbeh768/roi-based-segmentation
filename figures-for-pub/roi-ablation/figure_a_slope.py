@@ -32,11 +32,23 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 ROOT = next(p for p in HERE.parents if (p / 'train.py').exists())
 
-# Validated categorical slot 1 (light mode), checked with the dataviz validator:
-# lightness band, chroma floor and >= 3:1 contrast on the light surface all pass.
-SERIES = '#2a78d6'
-INK, INK_2, INK_MUTED = '#0b0b0b', '#52514e', '#8a8985'
-SURFACE = '#fcfcfb'
+# Style follows refrence-figures-hillestad/pig_vs_human_PF_density_Fig1.R: white
+# panel inside a full #222222 border, sans text in #111111, and filled markers
+# with a black edge. Gridlines are kept, the one departure from theme_classic.
+SERIES = '#2B8CBE'
+INK, FRAME, GRID = '#111111', '#222222', '#D9D9D9'
+SURFACE = '#FFFFFF'
+
+BORDER_LW, TICK_LW = 0.75, 0.55
+MARK_SIZE, MARK_EDGE = 5.0, 0.8
+AXIS_TEXT, AXIS_TITLE, PANEL_TITLE = 10.0, 11.5, 13.0
+
+matplotlib.rcParams.update({
+    'font.family': 'sans-serif',
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+    'svg.fonttype': 'none',
+})
 
 # Case identifiers are internal nomenclature -- 'AJKY121-7-2' tells a reader
 # nothing, and fourteen of them is a lot of ink for no information. The deltas
@@ -80,8 +92,9 @@ def main():
                 zorder=2, solid_capstyle='round')
     for c in cases:
         ax.plot([x0, x1], [base[c], abl[c]], linestyle='none', marker='o',
-                markersize=5, markerfacecolor=SERIES, markeredgecolor=SURFACE,
-                markeredgewidth=0.8, alpha=1.0, zorder=3)
+                markersize=MARK_SIZE, markerfacecolor=SERIES,
+                markeredgecolor='black', markeredgewidth=MARK_EDGE,
+                alpha=1.0, zorder=3)
 
     # every case labelled at its ablation endpoint. Endpoints collide (four
     # cases land within 0.03 of each other), so nudge overlapping labels apart
@@ -101,35 +114,37 @@ def main():
     # left edge of the text box every time.
     label_x, gap = x1 + 0.065, 0.010
     for c, y in zip(order, ys):
-        ax.plot([x1, label_x - gap], [abl[c], y], color=INK_MUTED, lw=0.6,
-                alpha=0.7, zorder=1, solid_capstyle='butt')
+        ax.plot([x1, label_x - gap], [abl[c], y], color=FRAME, lw=0.6,
+                alpha=0.55, zorder=1, solid_capstyle='butt')
         label = f'{c}   {abl[c] - base[c]:+.3f}' if SHOW_CASE_NAMES \
             else f'{abl[c] - base[c]:+.3f}'
         ax.text(label_x, y, label,
-                ha='left', va='center', fontsize=7.5, color=INK_2)
+                ha='left', va='center', fontsize=8.0, color=INK)
 
     ax.set_xlim(-0.18, 1.34)
     ax.set_ylim(0.30, 1.02)
     ax.set_xticks([x0, x1])
-    ax.set_xticklabels(['Baseline', 'Noise'], fontsize=10, color=INK)
-    ax.set_ylabel('Slide-level IoU', fontsize=10, color=INK)
-    ax.tick_params(axis='y', labelsize=9, colors=INK_2, length=3)
+    ax.set_xticklabels(['Baseline', 'Noise'], fontsize=AXIS_TITLE, color=INK)
+    ax.set_ylabel('Slide-level IoU', fontsize=AXIS_TITLE, color=INK)
+    ax.tick_params(axis='y', labelsize=AXIS_TEXT, colors=INK, color=FRAME,
+                   width=TICK_LW, length=4)
     ax.tick_params(axis='x', length=0)
-    for s in ('top', 'right', 'bottom'):
-        ax.spines[s].set_visible(False)
-    ax.spines['left'].set_color(INK_MUTED)
-    ax.spines['left'].set_linewidth(0.8)
-    ax.grid(axis='y', color=INK_MUTED, alpha=0.22, lw=0.6)
+    for sp in ax.spines.values():
+        sp.set_visible(True)
+        sp.set_color(FRAME)
+        sp.set_linewidth(BORDER_LW)
+    ax.grid(axis='y', color=GRID, lw=0.5)
     ax.set_axisbelow(True)
 
     ax.set_title('Replacing the ROI with noise, tile selection unchanged',
-                 fontsize=11, color=INK, pad=30, loc='left')
+                 fontsize=PANEL_TITLE, color=INK, pad=26, loc='left')
     ax.text(0, 1.012, f'{len(cases)} leave-one-case-out folds',
-            transform=ax.transAxes, fontsize=8.5, color=INK_2, va='bottom')
+            transform=ax.transAxes, fontsize=AXIS_TEXT, color=FRAME, va='bottom')
 
     fig.tight_layout()
-    fig.savefig(a.out, dpi=a.dpi, facecolor=SURFACE, bbox_inches='tight')
-    print(f'wrote {a.out}')
+    out = Path(a.out).with_suffix('.pdf')
+    fig.savefig(out, facecolor=SURFACE, bbox_inches='tight')
+    print(f'wrote {out}')
 
     # stdout only -- the numbers for the prose, kept out of the figure
     d = np.array([abl[c] - base[c] for c in cases])
