@@ -1,0 +1,393 @@
+{
+  "name": "roi-ablation-unguided-2026-09-05",
+  "folds": [
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f00",
+      "case": [
+        "AJKV056-7"
+      ],
+      "slide_iou_case": 0.6107431182326039,
+      "per_slide": {
+        "AJKV056-7": {
+          "iou": 0.6107431182326039,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 55439526,
+          "pred_px": 52990825,
+          "native_hw": [
+            20264,
+            23816
+          ]
+        }
+      },
+      "tile_iou_reported": 0.46512665156000993,
+      "n_test_tiles": 961,
+      "best_epoch": 114
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f01",
+      "case": [
+        "21PControl_4"
+      ],
+      "slide_iou_case": 0.5383467777655069,
+      "per_slide": {
+        "21PControl_4": {
+          "iou": 0.5383467777655069,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 28805811,
+          "pred_px": 18498777,
+          "native_hw": [
+            15755,
+            21272
+          ]
+        }
+      },
+      "tile_iou_reported": 0.7756194734573364,
+      "n_test_tiles": 961,
+      "best_epoch": 63
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f02",
+      "case": [
+        "21PControl-2"
+      ],
+      "slide_iou_case": 0.2970357266989191,
+      "per_slide": {
+        "21PControl-2": {
+          "iou": 0.2970357266989191,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 25692824,
+          "pred_px": 8997320,
+          "native_hw": [
+            24147,
+            33357
+          ]
+        }
+      },
+      "tile_iou_reported": 0.708302485952353,
+      "n_test_tiles": 961,
+      "best_epoch": 36
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f03",
+      "case": [
+        "AJKY121-8"
+      ],
+      "slide_iou_case": 0.5824690168907053,
+      "per_slide": {
+        "AJKY121-8-1": {
+          "iou": 0.5866342944584454,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 28703221,
+          "pred_px": 33290722,
+          "native_hw": [
+            26834,
+            16126
+          ]
+        },
+        "AJKY121-8-2": {
+          "iou": 0.5803184779302205,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 65861137,
+          "pred_px": 53734042,
+          "native_hw": [
+            25639,
+            16915
+          ]
+        }
+      },
+      "tile_iou_reported": 0.6523018807780986,
+      "n_test_tiles": 1922,
+      "best_epoch": 20
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f04",
+      "case": [
+        "21PControl-1"
+      ],
+      "slide_iou_case": 0.7383640434616735,
+      "per_slide": {
+        "21PControl-1": {
+          "iou": 0.7383640434616735,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 5681423,
+          "pred_px": 6516415,
+          "native_hw": [
+            18604,
+            25973
+          ]
+        }
+      },
+      "tile_iou_reported": 0.4590683734419007,
+      "n_test_tiles": 961,
+      "best_epoch": 27
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f05",
+      "case": [
+        "FL_22P003-6"
+      ],
+      "slide_iou_case": 0.3283726476724306,
+      "per_slide": {
+        "FL_22P003-6_1of2": {
+          "iou": 0.24991903517392933,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 26423018,
+          "pred_px": 25729740,
+          "native_hw": [
+            14829,
+            21265
+          ]
+        },
+        "FL_22P003-6_2of2": {
+          "iou": 0.4392349896221596,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 21820405,
+          "pred_px": 20676373,
+          "native_hw": [
+            16678,
+            22186
+          ]
+        }
+      },
+      "tile_iou_reported": 0.7911017488460151,
+      "n_test_tiles": 1922,
+      "best_epoch": 33
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f06",
+      "case": [
+        "AJKV056-8"
+      ],
+      "slide_iou_case": 0.4125872822407512,
+      "per_slide": {
+        "AJKV056-8": {
+          "iou": 0.4125872822407512,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 19910906,
+          "pred_px": 33592822,
+          "native_hw": [
+            14835,
+            22134
+          ]
+        }
+      },
+      "tile_iou_reported": 0.5879592263698578,
+      "n_test_tiles": 961,
+      "best_epoch": 14
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f07",
+      "case": [
+        "17P645-1"
+      ],
+      "slide_iou_case": 0.0,
+      "per_slide": {
+        "17P645-1": {
+          "iou": 0.0,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 31241294,
+          "pred_px": 68435386,
+          "native_hw": [
+            24130,
+            35178
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8300002217292786,
+      "n_test_tiles": 961,
+      "best_epoch": 4
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f08",
+      "case": [
+        "AJK056-10"
+      ],
+      "slide_iou_case": 0.5183694912799244,
+      "per_slide": {
+        "AJK056-10-2of2": {
+          "iou": 0.6944494886366032,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 29847390,
+          "pred_px": 34462797,
+          "native_hw": [
+            23713,
+            14841
+          ]
+        },
+        "AJKV056-10-1-of-2": {
+          "iou": 0.37216421383616016,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 29379259,
+          "pred_px": 33340475,
+          "native_hw": [
+            22131,
+            14837
+          ]
+        }
+      },
+      "tile_iou_reported": 0.6360358364728033,
+      "n_test_tiles": 1922,
+      "best_epoch": 25
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f09",
+      "case": [
+        "AJKY121-7-2"
+      ],
+      "slide_iou_case": 0.5317723535017468,
+      "per_slide": {
+        "AJKY121-7-2": {
+          "iou": 0.5317723535017468,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 20077150,
+          "pred_px": 34930183,
+          "native_hw": [
+            14847,
+            21936
+          ]
+        }
+      },
+      "tile_iou_reported": 0.7420780229568481,
+      "n_test_tiles": 961,
+      "best_epoch": 57
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f10",
+      "case": [
+        "21PControl-11"
+      ],
+      "slide_iou_case": 0.39883124574747136,
+      "per_slide": {
+        "21PControl-11-1of2": {
+          "iou": 0.4008467176169901,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 234031690,
+          "pred_px": 140513211,
+          "native_hw": [
+            25975,
+            35168
+          ]
+        },
+        "21PControl-11-2of2": {
+          "iou": 0.3976692582006621,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 203737532,
+          "pred_px": 444438477,
+          "native_hw": [
+            33344,
+            42535
+          ]
+        }
+      },
+      "tile_iou_reported": 0.587828263944509,
+      "n_test_tiles": 1922,
+      "best_epoch": 42
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f11",
+      "case": [
+        "17P391_7A"
+      ],
+      "slide_iou_case": 9.885073886039074e-06,
+      "per_slide": {
+        "17P391_7A": {
+          "iou": 9.885073886039074e-06,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 55210712,
+          "pred_px": 24626,
+          "native_hw": [
+            18473,
+            23969
+          ]
+        }
+      },
+      "tile_iou_reported": 0.704048558473587,
+      "n_test_tiles": 961,
+      "best_epoch": 29
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f12",
+      "case": [
+        "21PControl-9"
+      ],
+      "slide_iou_case": 0.24213028125704347,
+      "per_slide": {
+        "21PControl-9-1of2": {
+          "iou": 0.5744497451206684,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 56656824,
+          "pred_px": 87374078,
+          "native_hw": [
+            18514,
+            23332
+          ]
+        },
+        "21PControl-9-2of2": {
+          "iou": 0.15525738727725208,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 280182758,
+          "pred_px": 124092461,
+          "native_hw": [
+            24136,
+            37007
+          ]
+        }
+      },
+      "tile_iou_reported": 0.5353177153334325,
+      "n_test_tiles": 1922,
+      "best_epoch": 4
+    },
+    {
+      "run": "roi-ablation-unguided-2026-09-05-f13",
+      "case": [
+        "AJKY121-9"
+      ],
+      "slide_iou_case": 0.645561539528653,
+      "per_slide": {
+        "AJKY121-9-1": {
+          "iou": 0.5290056053906321,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 52828963,
+          "pred_px": 46040206,
+          "native_hw": [
+            27485,
+            18514
+          ]
+        },
+        "AJKY121-9-2": {
+          "iou": 0.7564034100262103,
+          "covered_frac": 1.0,
+          "gt_outside_covered": 0,
+          "gt_px": 56269667,
+          "pred_px": 63158460,
+          "native_hw": [
+            25678,
+            14840
+          ]
+        }
+      },
+      "tile_iou_reported": 0.692207233030226,
+      "n_test_tiles": 1922,
+      "best_epoch": 20
+    }
+  ]
+}
