@@ -1,4 +1,4 @@
-"""Figure A -- the ROI as an input prior.
+"""Figure: what the ROI contributes as an input, with tile selection held fixed.
 
 Paired slope chart: slide-level IoU for each held-out case, baseline (real ROI)
 against the ablation that replaces the ROI with N(0,1) noise. Both arms are
@@ -18,8 +18,23 @@ the prose; the script prints them to stdout so the two cannot disagree.
 
 Usage:
     python figures-for-pub/roi-ablation/figure_a_slope.py
-    python figures-for-pub/roi-ablation/figure_a_slope.py --out /tmp/fig_a.png
+    python figures-for-pub/roi-ablation/figure_a_slope.py --out /tmp/fig_a.pdf
 """
+# Draft caption -- the numbers here are HARDCODED and the script prints its own
+# at run time. Re-check them against stdout before pasting; they will not follow
+# a re-scoring on their own.
+#
+#   Figure N. Effect of replacing the region of interest with noise. Each line
+#   is one held-out case (n = 14) under leave-one-case-out cross-validation,
+#   giving the slide-level intersection over union obtained with the drawn
+#   region of interest (Baseline) and with that input replaced by Gaussian
+#   noise of the same shape (Noise). Tile selection is identical between the
+#   two arms, so both are scored over the same region of each section and the
+#   connecting line is a paired comparison; only the tensor supplied to the
+#   network differs. Labels give the change for each case. Accuracy fell on 13
+#   of 14 cases (mean -0.224, range -0.524 to +0.001). All scores are computed
+#   at the full resolution of the source image and over the entire section.
+
 import argparse
 import json
 from pathlib import Path
@@ -136,10 +151,8 @@ def main():
     ax.grid(axis='y', color=GRID, lw=0.5)
     ax.set_axisbelow(True)
 
-    ax.set_title('Replacing the ROI with noise, tile selection unchanged',
-                 fontsize=PANEL_TITLE, color=INK, pad=26, loc='left')
-    ax.text(0, 1.012, f'{len(cases)} leave-one-case-out folds',
-            transform=ax.transAxes, fontsize=AXIS_TEXT, color=FRAME, va='bottom')
+    ax.set_title('ROI Replaced With Noise', fontsize=PANEL_TITLE, color=INK,
+                 pad=14, loc='left', fontweight='bold')
 
     fig.tight_layout()
     out = Path(a.out).with_suffix('.pdf')
