@@ -60,7 +60,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--canvases', default=str(HERE / 'canvases'))
     ap.add_argument('--out', default=str(HERE / 'qualitative-results.png'))
-    ap.add_argument('--dpi', type=int, default=300)
+    ap.add_argument('--dpi', type=int, default=1200)
     ap.add_argument('--slides', nargs='*', default=SLIDES)
     a = ap.parse_args()
 
