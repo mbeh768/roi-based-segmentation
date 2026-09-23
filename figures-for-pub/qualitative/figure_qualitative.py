@@ -22,8 +22,7 @@ show less red than the best one. Grey is separate from black because coverage
 runs 5-38% and painting unscored slide as correct background claims credit for
 area the model never saw.
 
-The left panel is the raw stained section from the source TIFF, brightened by a
-plain gain to a mean of 127 and nothing else, at the section's own aspect ratio.
+The left panel is the raw stained section as the canvases export rendered it.
 
 Slides run best to worst, each from a distinct case.
 
@@ -75,21 +74,23 @@ def main():
         code[pred & gt] = 2
         code[pred ^ gt] = 3
         gap = np.full((code.shape[0], 2, 3), SURFACE_RGB, np.uint8)
-        pairs.append((stem, float(d['iou']), np.hstack([d['image'], gap, LUT[code]])))
+        pairs.append((stem, float(d['iou']), float(d['dice']),
+                      np.hstack([d['image'], gap, LUT[code]])))
 
     # the figure is sized from the pairs rather than the other way round. imshow
     # holds aspect, so a cell taller than its image gets margin above and below
     # -- the vertical gap between rows is that margin, not subplot spacing.
     rows, cols = len(pairs) // 2, 2
-    aspect = max(p.shape[0] / p.shape[1] for _, _, p in pairs)
+    aspect = max(p.shape[0] / p.shape[1] for *_, p in pairs)
     fig, axes = plt.subplots(rows, cols,
                              figsize=(WIDTH, rows * (WIDTH / cols) * aspect),
                              gridspec_kw={'hspace': 0.5, 'wspace': 0.03})
     fig.patch.set_facecolor(SURFACE)
 
-    for ax, (stem, iou, pair) in zip(axes.ravel(), pairs):
+    for ax, (stem, iou, dice, pair) in zip(axes.ravel(), pairs):
         ax.imshow(pair)
-        ax.set_title(f'{stem}   IoU {iou:.3f}' if SHOW_CASE_NAMES else f'IoU {iou:.3f}',
+        score = f'IoU {iou:.3f}   Dice {dice:.3f}'
+        ax.set_title(f'{stem}   {score}' if SHOW_CASE_NAMES else score,
                      fontsize=8, color=INK)
 
     for ax in axes.ravel():

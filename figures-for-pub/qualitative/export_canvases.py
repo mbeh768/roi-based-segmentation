@@ -35,18 +35,21 @@ HERE = Path(__file__).resolve().parent
 # the repo root is the directory holding train.py, at whatever depth
 ROOT = next(p for p in HERE.parents if (p / 'train.py').exists())
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'utils'))
 
 import data_loader.data_loaders as module_data   # noqa: E402
 import model.model as module_arch                # noqa: E402
+from slide_render import find_slide, load_slide_rgb   # noqa: E402
+from slide_level_metrics import score_native          # noqa: E402
 
 # Two best and two worst slides, each from a DISTINCT case, ordered best to
 # worst. Four rather than six so each panel is large enough to read: at this
 # figure width six pairs leaves every section a thumbnail.
 SLIDES = [
-    '21PControl-9-2of2',    # 0.9918
+    '21PControl-9-2of2',    # 0.9921
     '17P391_7A',            # 0.9877
-    'AJKY121-7-2',          # 0.8844
-    '17P645-1',             # 0.8691
+    'AJKY121-7-2',          # 0.8851
+    '17P645-1',             # 0.8690
 ]
 
 # Loader settings that are an evaluation choice rather than a config choice.
@@ -54,61 +57,6 @@ SLIDES = [
 # loader's own defaults for hflip/vflip/rot90 are 0.0, so their absence is
 # augmentation off, and the assert below confirms it.
 EVAL_CONTROLLED = ('hflip', 'vflip', 'rot90', 'shuffle', 'num_workers', 'batch_size')
-
-
-def load_raw_rgb(raw_dir, stem, target):
-    """The stained section from the source TIFF, brightened to a mean of 127.
-
-    These files carry no pyramid, so there is no cheap low-resolution level and
-    the largest is 3 x 25975 x 35168 uint16 -- 5.5 GB in one piece. Two layouts
-    appear: CYX, which stores one channel per page, and YXS, which is a single
-    HWC page. The CYX case is read a page at a time and each plane shrunk before
-    the next is touched, so peak memory is one 1.8 GB plane rather than the
-    whole array. Resizing the uint16 in place rather than casting to float32
-    first keeps it from doubling again.
-
-    Returned at the section's OWN aspect ratio. Preprocessing zero-padded to a
-    square because the tiler wanted one; nothing downstream does any more, and
-    padding the figure would show the reader empty canvas that is not part of
-    the specimen. The caller crops the masks to match.
-
-    Brightness is a plain gain to a mean of 127, not a percentile stretch or
-    per-channel standardisation: this panel shows the reader the raw input, so
-    the only adjustment is the one that makes it visible on the page.
-
-    The source folder names do not match the preprocessed stems -- AJKY121-7-2
-    lives in AJKY121_7, and 17P645-1 in a folder with a parenthetical suffix --
-    but the FILE names carry the stem, so the glob keys on those.
-    """
-    import tifffile
-
-    hits = sorted(Path(raw_dir).glob(f'*/{stem}_image.*'))
-    if not hits:
-        raise SystemExit(f'no raw image for {stem} under {raw_dir}')
-    if len(hits) > 1:
-        print(f'    {stem}: {len(hits)} candidates, using {hits[0].name}')
-
-    def dsize(H, W):
-        scale = target / max(H, W)
-        return max(1, round(W * scale)), max(1, round(H * scale))
-
-    with tifffile.TiffFile(hits[0]) as tif:
-        series = tif.series[0]
-        if series.axes.startswith('C'):
-            H, W = series.shape[1], series.shape[2]
-            img = np.stack([cv2.resize(tif.pages[c].asarray(), dsize(H, W),
-                                       interpolation=cv2.INTER_AREA)
-                            for c in range(series.shape[0])], axis=-1)
-        else:
-            arr = series.asarray()
-            H, W = arr.shape[:2]
-            img = cv2.resize(arr, dsize(H, W), interpolation=cv2.INTER_AREA)
-
-    img = img.astype(np.float32)
-    img = np.clip(img * (127.0 / max(img.mean(), 1e-6)), 0, 255).astype(np.uint8)
-    print(f'    {stem}: {W}x{H} {series.dtype} {series.axes} -> '
-          f'{img.shape[1]}x{img.shape[0]}  mean {img.mean():.1f}')
-    return img
 
 
 def stitch(model, ds, idxs, wanted, device, amp, amp_dtype, batch_size):
@@ -239,15 +187,16 @@ def main():
             # average the overlapping predictions, THEN threshold once
             pred = (c['p'] / count > 0.5) & covered
             gt = (c['g'] / count > 0.5) & covered
-            inter = int(np.count_nonzero(pred & gt))
-            union = int(np.count_nonzero(pred | gt))
-            iou = inter / union if union else float('nan')
+            # the published numbers, so the caption and the table cannot disagree.
+            # gt above stays tile-space: it is what the agreement map is drawn on.
+            native = score_native(pred, covered, stem, a.raw_dir)[3]
+            iou, dice = native['iou'], native['dice']
 
             # crop the square canvas back to the section's own aspect. The pad
             # sits bottom-right and no tile ever covered it, so this leaves the
             # IoU above untouched -- it only stops the figure showing empty
             # canvas as though it were slide.
-            rgb = load_raw_rgb(a.raw_dir, stem, pred.shape[0])
+            rgb = load_slide_rgb(find_slide(a.raw_dir, stem), pred.shape[0])
             h, w = rgb.shape[:2]
             assert h <= pred.shape[0] and w <= pred.shape[1], \
                 f'{stem}: raw image {h}x{w} exceeds the {pred.shape} canvas'
@@ -263,13 +212,14 @@ def main():
 
             np.savez_compressed(outdir / f'{stem}.npz', pred=pred[:h, :w],
                                 gt=gt[:h, :w], covered=covered[:h, :w],
-                                roi=roi[:h, :w], image=rgb, iou=iou,
+                                roi=roi[:h, :w], image=rgb, iou=iou, dice=dice,
                                 run=d.name, stem=stem)
             found.add(stem)
 
             flag = f'  !! reference says {ref[stem]:.4f}' \
                 if stem in ref and abs(ref[stem] - iou) > 1e-4 else ''
-            print(f'  {stem:<22} iou {iou:.4f}  {pred.shape[0]}x{pred.shape[1]}'
+            print(f'  {stem:<22} iou {iou:.4f}  dice {dice:.4f}'
+                  f'  {pred.shape[0]}x{pred.shape[1]}'
                   f'  covered {covered.mean()*100:.1f}%{flag}')
 
         del model

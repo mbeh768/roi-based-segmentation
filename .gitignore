@@ -134,6 +134,7 @@ utils/copy_rois.sh
 
 # large images
 **/canvases/
+figures-for-pub/appendix/worst-performer.png
 
 # experiments archive
 experiments-archive

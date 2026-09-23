@@ -71,10 +71,13 @@ matplotlib.rcParams.update({
 # the names when the figure needs to be matched against a supplementary table.
 SHOW_CASE_NAMES = False
 
+HI = 1.02                  # top of the y axis
+HI_LABEL = HI - 0.015      # highest a label's centre may sit and stay inside it
 
-def load(path):
+
+def load(path, key):
     folds = json.loads(Path(path).read_text())['folds']
-    return {f['case'][0]: f['slide_iou_case'] for f in folds}
+    return {f['case'][0]: f[key] for f in folds}
 
 
 def main():
@@ -87,16 +90,37 @@ def main():
     ap.add_argument('--dpi', type=int, default=300)
     a = ap.parse_args()
 
-    base, abl = load(a.baseline), load(a.ablation)
-    missing = set(base) ^ set(abl)
+    panels = (('A. IoU Score', 'IoU', 'slide_iou_case'),
+              ('B. Dice Score', 'Dice', 'slide_dice_case'))
+    panels = [(label, name, load(a.baseline, key), load(a.ablation, key))
+              for label, name, key in panels]
+
+    missing = set(panels[0][2]) ^ set(panels[0][3])
     if missing:
         raise SystemExit(f'cases present in only one arm: {sorted(missing)}')
+
+    # one pair of limits for both panels, so Dice's compression toward 1 is
+    # visible rather than hidden by a re-zoomed axis
+    lo = min(min(min(b.values()), min(x.values())) for _, _, b, x in panels)
+    lo = np.floor(lo * 20 - 0.5) / 20
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.6, 5.6), sharey=True)
+    fig.patch.set_facecolor(SURFACE)
+    for ax, (label, name, base, abl) in zip(axes, panels):
+        panel(ax, label, name, base, abl, lo)
+
+    fig.supylabel('Slide-level score', fontsize=AXIS_TITLE, color=INK)
+    axes[1].tick_params(left=False, labelleft=False)
+
+    fig.tight_layout()
+    out = Path(a.out).with_suffix('.pdf')
+    fig.savefig(out, facecolor=SURFACE, bbox_inches='tight')
+    print(f'wrote {out}')
+
+
+def panel(ax, label, name, base, abl, lo):
     cases = sorted(base, key=lambda c: abl[c] - base[c])   # steepest drop first
 
-    # wider than tall-and-narrow: a cramped x-span exaggerates the slopes, and
-    # the reader is meant to judge the drop from the axis, not from the angle
-    fig, ax = plt.subplots(figsize=(6.6, 5.6))
-    fig.patch.set_facecolor(SURFACE)
     ax.set_facecolor(SURFACE)
     x0, x1 = 0.0, 1.0
 
@@ -122,6 +146,12 @@ def main():
         if ys and y - ys[-1] < min_gap:
             y = ys[-1] + min_gap
         ys.append(y)
+    # Dice crowds its endpoints near 1, so the nudged stack runs off the top of
+    # the panel. Drop it back inside, then re-separate downwards.
+    if ys[-1] > HI_LABEL:
+        ys = [y - (ys[-1] - HI_LABEL) for y in ys]
+        for i in range(len(ys) - 2, -1, -1):
+            ys[i] = min(ys[i], ys[i + 1] - min_gap)
     # Leaders are drawn by hand rather than with annotate's arrowprops, which
     # anchors to whichever point on the text bbox is nearest the marker -- so a
     # nudged label gets its line at a corner and an un-nudged one gets it at the
@@ -131,16 +161,15 @@ def main():
     for c, y in zip(order, ys):
         ax.plot([x1, label_x - gap], [abl[c], y], color=FRAME, lw=0.6,
                 alpha=0.55, zorder=1, solid_capstyle='butt')
-        label = f'{c}   {abl[c] - base[c]:+.3f}' if SHOW_CASE_NAMES \
+        delta = f'{c}   {abl[c] - base[c]:+.3f}' if SHOW_CASE_NAMES \
             else f'{abl[c] - base[c]:+.3f}'
-        ax.text(label_x, y, label,
+        ax.text(label_x, y, delta,
                 ha='left', va='center', fontsize=8.0, color=INK)
 
     ax.set_xlim(-0.18, 1.34)
-    ax.set_ylim(0.30, 1.02)
+    ax.set_ylim(lo, HI)
     ax.set_xticks([x0, x1])
     ax.set_xticklabels(['Baseline', 'Noise'], fontsize=AXIS_TITLE, color=INK)
-    ax.set_ylabel('Slide-level IoU', fontsize=AXIS_TITLE, color=INK)
     ax.tick_params(axis='y', labelsize=AXIS_TEXT, colors=INK, color=FRAME,
                    width=TICK_LW, length=4)
     ax.tick_params(axis='x', length=0)
@@ -151,20 +180,16 @@ def main():
     ax.grid(axis='y', color=GRID, lw=0.5)
     ax.set_axisbelow(True)
 
-    ax.set_title('ROI Replaced With Noise', fontsize=PANEL_TITLE, color=INK,
+    ax.set_title(label, fontsize=PANEL_TITLE, color=INK,
                  pad=14, loc='left', fontweight='bold')
-
-    fig.tight_layout()
-    out = Path(a.out).with_suffix('.pdf')
-    fig.savefig(out, facecolor=SURFACE, bbox_inches='tight')
-    print(f'wrote {out}')
 
     # stdout only -- the numbers for the prose, kept out of the figure
     d = np.array([abl[c] - base[c] for c in cases])
-    print(f"\n  {'case':<16}{'baseline':>10}{'ablation':>10}{'delta':>9}")
+    print(f'\n  [{name}]')
+    print(f"  {'case':<16}{'baseline':>10}{'ablation':>10}{'delta':>9}")
     for c in cases:
         print(f'  {c:<16}{base[c]:>10.4f}{abl[c]:>10.4f}{abl[c] - base[c]:>+9.4f}')
-    print(f'\n  baseline mean {np.mean([base[c] for c in cases]):.4f}   '
+    print(f'  baseline mean {np.mean([base[c] for c in cases]):.4f}   '
           f'ablation mean {np.mean([abl[c] for c in cases]):.4f}')
     print(f'  delta mean {d.mean():+.4f}  sd {d.std(ddof=1):.4f}  '
           f'range {d.min():+.4f}..{d.max():+.4f}  ({int((d < 0).sum())}/{len(d)} negative)')
