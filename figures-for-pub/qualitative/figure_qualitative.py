@@ -66,13 +66,14 @@ def main():
 
     # the pair is one image, not two axes: that is what keeps the gap at exactly
     # 2 px instead of whatever subplot spacing works out to
-    pairs = []
+    pairs, used = [], set()
     for stem in a.slides:
         d = np.load(Path(a.canvases) / f'{stem}.npz')
         pred, gt = d['pred'], d['gt']
         code = d['covered'].astype(np.uint8)
         code[pred & gt] = 2
         code[pred ^ gt] = 3
+        used.update(np.unique(code).tolist())
         gap = np.full((code.shape[0], 2, 3), SURFACE_RGB, np.uint8)
         pairs.append((stem, float(d['iou']), float(d['dice']),
                       np.hstack([d['image'], gap, LUT[code]])))
@@ -99,9 +100,13 @@ def main():
         for s in ax.spines.values():
             s.set_visible(False)
 
-    fig.legend([Rectangle((0, 0), 1, 1, facecolor=c / 255, edgecolor='#c3c2b7', lw=0.4)
-                for c in LUT], LABELS, loc='lower center', ncol=4, frameon=False,
-               fontsize=8, labelcolor=INK_2)
+    # a swatch for a colour that never appears just invites the reader to hunt
+    # for it -- the unguided arm scores the whole canvas, so it has no grey
+    keys = [i for i in range(len(LABELS)) if i in used]
+    fig.legend([Rectangle((0, 0), 1, 1, facecolor=LUT[i] / 255, edgecolor='#c3c2b7',
+                          lw=0.4) for i in keys],
+               [LABELS[i] for i in keys], loc='lower center', ncol=len(keys),
+               frameon=False, fontsize=8, labelcolor=INK_2)
     fig.savefig(a.out, dpi=a.dpi, facecolor=SURFACE, bbox_inches='tight')
     print(f'wrote {a.out}')
 
