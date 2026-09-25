@@ -70,13 +70,27 @@ def metrics(inter, n_pred, n_gt):
             'dice': 2 * inter / (n_pred + n_gt) if (n_pred + n_gt) else float('nan')}
 
 
-def score_native(pred, covered, stem, raw_dir):
-    """Score a stitched canvas against the SOURCE mask TIFF at its own resolution.
+def to_native(mask, H, W):
+    """A stitched canvas mask at the source TIFF's own (H, W) resolution.
 
     preprocess.py resized native (H, W) so the longest side is `canvas` with aspect
     preserved, then zero-padded bottom-right to a square, so the inverse is exact:
     crop to (out_h, out_w) and resize back to (H, W). Nearest everywhere, because
-    both are label masks and interpolation would invent boundary values.
+    these are label masks and interpolation would invent boundary values.
+    """
+    s = mask.shape[0] / max(H, W)
+    oh, ow = round(H * s), round(W * s)
+    return cv2.resize(mask[:oh, :ow].astype(np.uint8), (W, H),
+                      interpolation=cv2.INTER_NEAREST) > 0
+
+
+def score_native(pred, covered, stem, raw_dir, save_to=None):
+    """Score a stitched canvas against the SOURCE mask TIFF at its own resolution.
+
+    `save_to` also writes the native-resolution prediction there as <stem>.npz.
+    Quantification grows its depth bands from that array, and taking it from the
+    same call that produced the reported score is what stops a saved mask and a
+    published number drifting apart.
     """
     hits = sorted(Path(raw_dir).glob(f'*/{stem}_mask.*'))
     if not hits:
@@ -87,12 +101,11 @@ def score_native(pred, covered, stem, raw_dir):
     gt = gt > 127                       # matches preprocess.py's >0.5 after /255
     H, W = gt.shape
 
-    canvas = pred.shape[0]
-    s = canvas / max(H, W)
-    oh, ow = round(H * s), round(W * s)
-    up = lambda m: cv2.resize(m[:oh, :ow].astype(np.uint8), (W, H),
-                              interpolation=cv2.INTER_NEAREST) > 0
+    up = lambda m: to_native(m, H, W)
     pred_n = up(pred)
+    if save_to is not None:
+        np.savez_compressed(Path(save_to) / f'{stem}.npz', pred=pred_n,
+                            stem=stem, native_hw=[int(H), int(W)])
 
     # Scored over the WHOLE image, not just the tile-covered region. Masking to
     # coverage would hide ground truth that roi_exclusion dropped -- those pixels
@@ -114,7 +127,7 @@ def score_native(pred, covered, stem, raw_dir):
 
 
 def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size,
-                raw_dir=None):
+                raw_dir=None, save_masks=None):
     """Accumulate predictions onto per-slide canvases and score each slide."""
     from torch.utils.data.dataloader import default_collate
 
@@ -151,7 +164,8 @@ def stitch_fold(model, ds, idxs, device, amp, amp_dtype, batch_size,
         # average the overlapping predictions, THEN threshold once
         pred = (c['p'] / count > 0.5) & covered
         if raw_dir is not None:
-            inter, n_pred, n_gt, rec = score_native(pred, covered, stem, raw_dir)
+            inter, n_pred, n_gt, rec = score_native(pred, covered, stem, raw_dir,
+                                                    save_to=save_masks)
         else:
             gt = (c['g'] / count > 0.5) & covered
             inter = int(np.count_nonzero(pred & gt))
@@ -181,6 +195,10 @@ def main():
                          'data_loader.data_loaders -- e.g. an ablation: '
                          'figures-for-pub/roi-ablation/noise_roi.py. The model must be '
                          'evaluated through the loader it was TRAINED with.')
+    ap.add_argument('--save-masks', default=None,
+                    help='also write each native-resolution prediction there as '
+                         '<stem>.npz, for quantification to grow depth bands from. '
+                         'Native scoring only, so not compatible with --canvas-gt.')
     ap.add_argument('--canvas-gt', action='store_true',
                     help='score against the stitched TILE masks on the tiling canvas '
                          'instead of the source mask TIFF. Only for reproducing older '
@@ -200,6 +218,10 @@ def main():
     runs = [d for d in runs if (d / 'model_best.pth').exists() and (d / 'config.json').exists()]
     if not runs:
         raise SystemExit(f'no runs with a checkpoint under {a.models_dir}/{a.name}-f*')
+    if a.save_masks:
+        if a.canvas_gt:
+            raise SystemExit('--save-masks needs native scoring; drop --canvas-gt')
+        Path(a.save_masks).mkdir(parents=True, exist_ok=True)
     if a.loader_module:
         import importlib.util
         p = Path(a.loader_module).resolve()
@@ -239,7 +261,8 @@ def main():
         amp_dtype = getattr(torch, cfg['trainer'].get('amp_dtype', 'bfloat16'))
         case, per_slide = stitch_fold(model, ds, idxs, device, amp, amp_dtype,
                                       a.batch_size,
-                                      raw_dir=None if a.canvas_gt else a.raw_dir)
+                                      raw_dir=None if a.canvas_gt else a.raw_dir,
+                                      save_masks=a.save_masks)
 
         tile_iou = json.loads((d / 'test_results.json').read_text()).get('test_iou') \
             if (d / 'test_results.json').exists() else None
