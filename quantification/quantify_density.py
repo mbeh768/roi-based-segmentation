@@ -252,6 +252,11 @@ def main():
 
     stems = a.slides or [s for f in json.loads(Path(a.metrics).read_text())['folds']
                          for s in f['per_slide']]
+    # up front, not per slide: the check is free and each slide costs minutes
+    missing = [s for s in stems if not (voxel.get(s) or {}).get('um_per_px')]
+    if voxel and missing:
+        raise SystemExit(f'no um_per_px in {Path(a.voxel).name} for: ' + ', '.join(missing))
+
     qc = Path(a.qc_dir) if a.qc_dir else None
     if qc:
         qc.mkdir(parents=True, exist_ok=True)
