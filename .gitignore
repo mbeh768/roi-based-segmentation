@@ -128,6 +128,7 @@ __MACOSX/
 
 # intermediate planning documents
 repo-cleanup
+quantification/algorithm.md
 
 # local ROI staging helper (machine-specific archive path)
 utils/copy_rois.sh
