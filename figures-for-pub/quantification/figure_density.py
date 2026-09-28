@@ -3,15 +3,17 @@
 Geometry and theme follow refrence-figures-hillestad/pig_vs_human_PF_density_Fig1.R,
 with the paired factor changed from pig/human to ground truth/predicted.
 
-Agreement per band is Lin's concordance rather than a significance star. The
-claim is that the two arms measure the same thing, which a difference test can
-only fail to reject, and it scores consistency over closeness -- it ranked the
-visibly better human agreement as the significant one. The paired t stays in the
-statistics CSV.
+Agreement per band is Lin's concordance. No significance test: the claim is
+that the two arms measure the same thing, which a difference test can only fail
+to reject, and it scores consistency over closeness -- it ranked the visibly
+better human agreement as the significant one.
 
 rho is normalised per slide, so 0.5 is the balance of the tissue outside the
 mask. Split by species because that spread would otherwise swamp the comparison.
-Sections with a known acquisition problem are marked, not dropped.
+
+Sections with a known acquisition problem are drawn in grey and left in the
+plot, but the CCC on the figure excludes them; ccc_all in the statistics CSV
+keeps them, and that is the number to quote in the text.
 
 Usage:
     python figures-for-pub/quantification/figure_density.py
@@ -27,7 +29,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-from scipy import stats
 
 HERE = Path(__file__).resolve().parent
 ROOT = next(p for p in HERE.parents if (p / 'train.py').exists())
@@ -126,19 +127,22 @@ def panel(ax, ax_title, data, slides, lo, hi):
             groups.append((x, paired[arm], colour, marker, slides))
 
         d = paired['ground truth'] - paired['predicted']
-        t, pv = stats.ttest_rel(paired['ground truth'], paired['predicted'])
+        # the figure shows agreement over the unmarked sections; every section
+        # is still plotted and still in ccc_all, which is what the text quotes
+        keep = [i for i, s in enumerate(slides) if s not in MARKED]
         rows.append({'species': ax_title.split('. ')[1], 'band': band,
-                     'n': len(slides),
+                     'n': len(slides), 'n_unmarked': len(keep),
                      'gt_mean': paired['ground truth'].mean(),
                      'pred_mean': paired['predicted'].mean(),
                      'mean_difference': d.mean(), 'sd_difference': d.std(ddof=1),
-                     'ccc': ccc(paired['ground truth'], paired['predicted']),
-                     'paired_t': t, 'p_value': pv})
+                     'ccc_all': ccc(paired['ground truth'], paired['predicted']),
+                     'ccc_unmarked': ccc(paired['ground truth'][keep],
+                                         paired['predicted'][keep])})
 
     pad = 0.10 * (hi - lo)
     y = hi + 0.45 * pad
     for i, r in enumerate(rows):
-        ax.text(i, y, f"CCC {r['ccc']:.3f}", ha='center', va='bottom',
+        ax.text(i, y, f"CCC {r['ccc_unmarked']:.3f}", ha='center', va='bottom',
                 fontsize=STAR_TEXT, color=INK_2)
 
     ax.set_xticks(range(len(BANDS)))
@@ -244,12 +248,15 @@ def main():
         w.writeheader()
         w.writerows(rows)
     print(f'wrote {a.stats}\n')
-    print(f"  {'species':<8}{'band':<12}{'n':>3}{'gt':>9}{'pred':>9}"
-          f"{'diff':>10}{'sd':>9}{'CCC':>8}{'p':>9}")
+    print(f"  {'species':<8}{'band':<12}{'n':>3}{'gt':>9}{'pred':>9}{'diff':>10}"
+          f"{'sd':>9}{'CCC all':>9}{'CCC unm':>9}")
     for r in rows:
         print(f"  {r['species']:<8}{r['band']:<12}{r['n']:>3}{r['gt_mean']:>9.4f}"
               f"{r['pred_mean']:>9.4f}{r['mean_difference']:>+10.4f}"
-              f"{r['sd_difference']:>9.4f}{r['ccc']:>8.3f}{r['p_value']:>9.4f}")
+              f"{r['sd_difference']:>9.4f}{r['ccc_all']:>9.3f}"
+              f"{r['ccc_unmarked']:>9.3f}")
+    print(f'\n  CCC all = every section, for the text.  CCC unm = without '
+          f'{", ".join(MARKED)}, which is what the figure shows.')
 
 
 if __name__ == '__main__':
