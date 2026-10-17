@@ -52,7 +52,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--config', default=str(ROOT / 'config.json'))
     ap.add_argument('--model-json',
-                    default=str(ROOT / 'figures-for-pub' / 'baseline'
+                    default=str(ROOT / 'figures-for-pub' / 'model-baseline'
                                 / 'k-fold-baseline-2026-09-02_slide_metrics.json'))
     ap.add_argument('--out', default=str(HERE / 'roi-upsample.json'))
     a = ap.parse_args()

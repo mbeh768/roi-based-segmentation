@@ -224,7 +224,7 @@ def main():
     ap.add_argument('--raw-dir',
                     default=json.loads((ROOT / 'config.json').read_text())
                     ['preprocess']['raw_image_directory'])
-    ap.add_argument('--metrics', default=str(ROOT / 'figures-for-pub' / 'baseline'
+    ap.add_argument('--metrics', default=str(ROOT / 'figures-for-pub' / 'model-baseline'
                                              / 'k-fold-baseline-2026-09-02_slide_metrics.json'))
     ap.add_argument('--voxel', default=str(HERE / 'microns_per_pixel.json'))
     ap.add_argument('--predictions', default=str(HERE / 'predictions'))

@@ -6,7 +6,7 @@ needs the arrays themselves, so this re-runs the same stitch and writes them to
 disk. The stitching logic is deliberately identical -- accumulate onto an
 image_H x image_W canvas, divide by the coverage count, threshold ONCE -- so the
 IoU printed here can be checked against the number already in
-figures-for-pub/baseline/k-fold-baseline-2026-09-02_slide_metrics.json. It flags any
+figures-for-pub/model-baseline/k-fold-baseline-2026-09-02_slide_metrics.json. It flags any
 slide that disagrees by more than 1e-4.
 
 Only the folds holding out a requested slide are loaded, so exporting four
@@ -104,7 +104,7 @@ def main():
                     default=json.loads((ROOT / 'config.json').read_text())
                     ['preprocess']['raw_image_directory'],
                     help='source TIFFs, for the stained section shown beside the map')
-    ap.add_argument('--reference', default=str(ROOT / 'figures-for-pub' / 'baseline'
+    ap.add_argument('--reference', default=str(ROOT / 'figures-for-pub' / 'model-baseline'
                                                / 'k-fold-baseline-2026-09-02_slide_metrics.json'),
                     help='slide-level JSON to cross-check the recomputed IoU against')
     ap.add_argument('--loader-module', default=None,

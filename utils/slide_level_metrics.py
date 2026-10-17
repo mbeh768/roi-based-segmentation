@@ -42,7 +42,7 @@ both empty adds nothing to either the intersection or the union.
 
 Usage:
     python utils/slide_level_metrics.py --name k-fold-baseline \
-        --outdir figures-for-pub/baseline
+        --outdir figures-for-pub/model-baseline
 """
 import argparse
 import json
@@ -209,7 +209,7 @@ def main():
                     help='source TIFFs, holding <stem>_mask.* for native-resolution GT')
     ap.add_argument('--outdir', required=True,
                     help="experiment folder to write <name>_slide_metrics.json into, "
-                         "e.g. figures-for-pub/baseline. Required so results land "
+                         "e.g. figures-for-pub/model-baseline. Required so results land "
                          "with the experiment that produced them rather than "
                          "beside this script.")
     a = ap.parse_args()

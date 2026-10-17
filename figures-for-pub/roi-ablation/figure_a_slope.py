@@ -82,7 +82,7 @@ def load(path, key):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--baseline', default=str(ROOT / 'figures-for-pub' / 'baseline'
+    ap.add_argument('--baseline', default=str(ROOT / 'figures-for-pub' / 'model-baseline'
                                               / 'k-fold-baseline-2026-09-02_slide_metrics.json'))
     ap.add_argument('--ablation', default=str(
         HERE / 'roi-ablation-noise-2026-09-03_slide_metrics.json'))
