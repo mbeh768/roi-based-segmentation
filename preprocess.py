@@ -276,6 +276,44 @@ class Preprocessor:
             return image
         return image.mean(axis=0, keepdims=True)
 
+    def gain_normalize(self, image, pct=99.9):
+        '''
+        Scale a (C, H, W) float32 array so its `pct` percentile reaches 1.0, clipped.
+
+        Dividing by the dtype's full scale leaves BETWEEN-SLIDE exposure in the
+        input: the 99.9th percentile runs from 0.07 to 0.70 across these twenty
+        sections, a ~10x spread uncorrelated with whether the source was 8- or
+        16-bit. BatchNorm does not absorb it, because it pools statistics over the
+        BATCH rather than the sample -- with shuffle a batch mixes tiles from many
+        slides and one affine is applied to all of them, so a dim slide's tile
+        stays dim relative to a bright one's, and at inference the running
+        statistics are frozen.
+
+        ONE scalar for the whole array, never per channel: a per-channel factor
+        would equalise the real MYL4-to-counterstain imbalance that the density
+        quantification reports as a finding.
+
+        A percentile rather than the maximum: a handful of saturated pixels
+        otherwise set the factor and the section stays dark. Clipping costs
+        0.0-0.4% of tissue pixels (measured over 529 tiles spanning all twenty
+        slides), because the bright tail is rare in the ROI-adjacent region.
+
+        Zeros are excluded -- the unscanned canvas and the bottom-right pad are
+        zero, and including them drags the percentile toward the padding.
+
+        Returns (scaled image, factor). Adopted on the basis of a two-fold pilot
+        (folds 3 and 5): slide-level IoU +0.008 and +0.028 against freshly rerun
+        controls, every held-out section improving, larger where the factor was
+        larger.
+        '''
+        scanned = image > 0
+        if not scanned.any():
+            return image, 1.0
+        hi = float(np.percentile(image[scanned], pct))
+        if hi <= 0.0:
+            return image, 1.0
+        return np.clip(image / hi, 0.0, 1.0), 1.0 / hi
+
     def _make_vis(self, arr):
         '''Build an HWC uint8 RGB preview from a CHW float32 array, clipped at 99th percentile.'''
         if arr.shape[0] >= 3:
@@ -436,6 +474,15 @@ if __name__ == '__main__':
     if not args.dry_run:
         p.clear_existing_data()
 
+    # Off by default, so an existing config reproduces the previous tensors byte
+    # for byte. The factors are written beside them as gains.json: the number is
+    # part of how the input was built, and a run should not have to be re-derived
+    # to find out what it was.
+    gain_normalize = config['preprocess'].get('gain_normalize', False)
+    gains = {}
+    if gain_normalize:
+        logger.info("gain normalization ON: local tiles scaled so p99.9 -> 1.0")
+
     for i, image_path in enumerate(image_paths):
         clean_stem = image_path.stem.replace('_image', '').replace('.ome', '')
         scene_idx = scene_map.get(clean_stem, 0)
@@ -488,6 +535,13 @@ if __name__ == '__main__':
                                         target_size=tiling_size, scene_index=scene_idx)
         if collapse:
             image_local = p.collapse_channels(image_local)
+        # Local tiles only. global.pt is annotation and preview material and is
+        # never read during training (see LocalGlobalDataset's docstring), so
+        # gaining it would widen the change without reaching the model.
+        if gain_normalize:
+            image_local, gain = p.gain_normalize(image_local)
+            gains[clean_stem] = gain
+            logger.info(f"[GAIN]\t\t{clean_stem}  p99.9 -> 1.0, factor {gain:.2f}x")
         n = p.save_local(image_local, clean_stem, 'images', dry_run=args.dry_run)
         logger.info(f"[COMPLETE]\tlocal image  {n} patches")
 
@@ -499,5 +553,13 @@ if __name__ == '__main__':
             logger.info(f"[COMPLETE]\tlocal mask  {n} patches")
 
         logger.info("")
+
+    if gains and not args.dry_run:
+        out = tile_dir / 'gains.json'
+        out.write_text(json.dumps({'percentile': 99.9, 'source': 'local tiling canvas',
+                                   'slides': gains}, indent=2))
+        v = sorted(gains.values())
+        logger.info(f"wrote {out}  ({len(gains)} slides, "
+                    f"{v[0]:.2f}x - {v[-1]:.2f}x)")
 
     logger.info("preprocess complete")

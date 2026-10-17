@@ -58,7 +58,8 @@
         "tiling_size": 8192,
         "tile_size": 512,
         "stride": 256,
-        "collapse": true
+        "collapse": true,
+        "gain_normalize": true
     },
     "trainer": {
         "epochs": 800,
