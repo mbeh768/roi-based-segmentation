@@ -12,7 +12,8 @@
             "freeze_local_encoder": true,
             "use_roi": true,
             "roi_ch": 1,
-            "skip_proj": true
+            "skip_proj": true,
+            "train_bn_affine": true
         }
     },
     "data_loader": {
@@ -29,7 +30,8 @@
             "require_roi": true,
             "roi_exclusion": true,
             "roi_exclusion_radius": 0.0,
-            "n_val_cases": 3
+            "n_val_cases": 3,
+            "brightness": [0.1, 2.0]
         }
     },
     "optimizer": {
@@ -58,8 +60,7 @@
         "tiling_size": 8192,
         "tile_size": 512,
         "stride": 256,
-        "collapse": true,
-        "gain_normalize": true
+        "collapse": true
     },
     "trainer": {
         "epochs": 800,

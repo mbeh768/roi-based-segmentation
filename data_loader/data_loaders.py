@@ -37,11 +37,13 @@ class LocalGlobalDataLoader(BaseDataLoader):
                  hflip=0.0, vflip=0.0, rot90=0.0,
                  require_roi=False,
                  roi_exclusion=False, roi_exclusion_radius=0.05,
-                 split_seed=0, n_folds=0, fold=0, n_val_cases=0):
+                 split_seed=0, n_folds=0, fold=0, n_val_cases=0,
+                 brightness=None):
         self.dataset = self._make_dataset(
             data_dir, hflip=hflip, vflip=vflip, rot90=rot90,
             require_roi=require_roi,
             roi_exclusion=roi_exclusion, roi_exclusion_radius=roi_exclusion_radius,
+            brightness=brightness,
         )
         self._batch_size = batch_size
         self.split_seed = split_seed

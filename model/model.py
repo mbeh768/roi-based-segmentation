@@ -1,6 +1,7 @@
 import timm
 import torch
 import torch.nn as nn
+from torch.nn.modules.batchnorm import _BatchNorm
 from base import BaseModel
 
 
@@ -38,6 +39,15 @@ class ImageNetPretrainedLocalUNet(BaseModel):
     before it is concatenated, as an adapter for the frozen ImageNet features.
     With it off the skips are passed through raw.
 
+    train_bn_affine leaves the frozen stages' BatchNorm weight and bias
+    trainable while their convolutions stay frozen -- 9,600 parameters, 0.09%
+    of the encoder, against 3.3M already trainable. It is a learnable
+    per-channel scale and shift on every frozen feature map, which is what lets
+    the network absorb between-slide exposure itself instead of being handed a
+    fixed per-slide factor. Note the running statistics already update whether
+    or not this is set: freezing only ever touched requires_grad, and nothing
+    puts those stages in eval() or clears track_running_stats.
+
     freeze_local_encoder accepts either a bool (True = freeze all stages,
     False = freeze none) or a list of stage indices in [0..4] to freeze
     individually. Stages map to ResNet modules as:
@@ -60,7 +70,8 @@ class ImageNetPretrainedLocalUNet(BaseModel):
                  freeze_local_encoder=False,
                  bottleneck_dropout=0.1,
                  use_roi=False, roi_ch=1,
-                 skip_proj=False):
+                 skip_proj=False,
+                 train_bn_affine=False):
         super().__init__()
 
         self.use_roi = use_roi
@@ -99,8 +110,14 @@ class ImageNetPretrainedLocalUNet(BaseModel):
                         f"backbone '{backbone}' does not expose '{mod_name}'; "
                         f"stage-level freezing assumes ResNet-family structure"
                     )
-                for p in getattr(self.backbone, mod_name).parameters():
-                    p.requires_grad = False
+                # Walk modules rather than parameters() so BatchNorm can be
+                # spared individually; parameters(recurse=False) stops a skipped
+                # BN from being frozen again by an ancestor's recursive walk.
+                for m in getattr(self.backbone, mod_name).modules():
+                    if train_bn_affine and isinstance(m, _BatchNorm):
+                        continue
+                    for p in m.parameters(recurse=False):
+                        p.requires_grad = False
 
         self.bot_drop = nn.Dropout2d(bottleneck_dropout)
 

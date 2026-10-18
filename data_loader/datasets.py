@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import math
 import random
 import numpy as np
 import cv2
@@ -41,6 +42,23 @@ def _apply_geo_pos(pos, params):
     return torch.tensor([y0, x0, y1, x1], dtype=pos.dtype)
 
 
+def _brightness_jitter(lo, hi):
+    """Exposure jitter, log-uniform in [lo, hi].
+
+    Multiplicative and log-uniform because exposure scales the signal and spans
+    ~10x here (p99.9 runs 0.072 to 0.702 across the twenty sections). The range
+    is asymmetric because the directions are not equivalent: tiles live in
+    [0, 1], so darkening is lossless while brightening saturates against the
+    ceiling -- the brightest section clips at ~1.4x, the dimmest not until ~14x.
+    """
+    log_lo, log_hi = math.log(lo), math.log(hi)
+
+    def apply(t):
+        return (t * math.exp(random.uniform(log_lo, log_hi))).clamp(max=1.0)
+
+    return apply
+
+
 def _geo_augment(*tensors, pos, flags):
     """Back-compat: sample one set of geo params and apply to all tensors + pos."""
     params = _sample_geo_params(flags)
@@ -71,7 +89,8 @@ class LocalGlobalDataset(Dataset):
     """
     def __init__(self, data_dir, hflip=0.0, vflip=0.0, rot90=0.0,
                  require_roi=False,
-                 roi_exclusion=False, roi_exclusion_radius=0.05):
+                 roi_exclusion=False, roi_exclusion_radius=0.05,
+                 brightness=None):
         data_dir = Path(data_dir)
         self.image_dir = data_dir / 'images'
         self.mask_dir  = data_dir / 'masks'
@@ -81,8 +100,9 @@ class LocalGlobalDataset(Dataset):
         self.roi_exclusion = roi_exclusion
         self.roi_exclusion_radius = roi_exclusion_radius
 
-        # Photometric — applied to local only (add blur, erasure, etc. here)
-        self.photo_transform = None
+        # Photometric — applied to local only (add blur, erasure, etc. here).
+        # brightness is a [lo, hi] multiplicative range; None or absent disables.
+        self.photo_transform = _brightness_jitter(*brightness) if brightness else None
 
         self.items = []
         self.stem_to_roi = {}
@@ -183,8 +203,11 @@ class LocalGlobalDataset(Dataset):
                 local, mask, pos = _geo_augment(
                     local, mask, pos=pos, flags=self.aug_flags,
                 )
-        if self.photo_transform is not None:
-            local = self.photo_transform(local)
+            # Inside the augment guard: every evaluation path zeroes the geo
+            # flags, so a config carrying `brightness` cannot randomise a
+            # held-out score.
+            if self.photo_transform is not None:
+                local = self.photo_transform(local)
 
         if roi is not None:
             return local, pos, roi, mask
