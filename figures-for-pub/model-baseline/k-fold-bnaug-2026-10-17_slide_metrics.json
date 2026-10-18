@@ -1,0 +1,427 @@
+{
+  "name": "k-fold-bnaug-2026-10-17",
+  "folds": [
+    {
+      "run": "k-fold-bnaug-2026-10-17-f00",
+      "case": [
+        "AJKV056-7"
+      ],
+      "slide_iou_case": 0.9282815642655634,
+      "slide_dice_case": 0.9628070728551759,
+      "per_slide": {
+        "AJKV056-7": {
+          "iou": 0.9282815642655634,
+          "dice": 0.9628070728551759,
+          "covered_frac": 0.4350175330083608,
+          "gt_outside_covered": 0,
+          "gt_px": 55439526,
+          "pred_px": 52758250,
+          "native_hw": [
+            20264,
+            23816
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8252951949834824,
+      "n_test_tiles": 307,
+      "best_epoch": 112
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f01",
+      "case": [
+        "21PControl_4"
+      ],
+      "slide_iou_case": 0.9693437699259424,
+      "slide_dice_case": 0.9844332764333926,
+      "per_slide": {
+        "21PControl_4": {
+          "iou": 0.9693437699259424,
+          "dice": 0.9844332764333926,
+          "covered_frac": 0.27560546273805997,
+          "gt_outside_covered": 0,
+          "gt_px": 28805811,
+          "pred_px": 28600810,
+          "native_hw": [
+            15755,
+            21272
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8706725001335144,
+      "n_test_tiles": 163,
+      "best_epoch": 265
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f02",
+      "case": [
+        "21PControl-2"
+      ],
+      "slide_iou_case": 0.9595759866101827,
+      "slide_dice_case": 0.9793710406404063,
+      "per_slide": {
+        "21PControl-2": {
+          "iou": 0.9595759866101827,
+          "dice": 0.9793710406404063,
+          "covered_frac": 0.11601604580216303,
+          "gt_outside_covered": 0,
+          "gt_px": 25692824,
+          "pred_px": 26336897,
+          "native_hw": [
+            24147,
+            33357
+          ]
+        }
+      },
+      "tile_iou_reported": 0.7890624105930328,
+      "n_test_tiles": 64,
+      "best_epoch": 192
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f03",
+      "case": [
+        "AJKY121-8"
+      ],
+      "slide_iou_case": 0.9410916652469726,
+      "slide_dice_case": 0.9696519562637284,
+      "per_slide": {
+        "AJKY121-8-1": {
+          "iou": 0.9435187612033594,
+          "dice": 0.9709386706605964,
+          "covered_frac": 0.29574837404156584,
+          "gt_outside_covered": 0,
+          "gt_px": 28703221,
+          "pred_px": 28920227,
+          "native_hw": [
+            26834,
+            16126
+          ]
+        },
+        "AJKY121-8-2": {
+          "iou": 0.9400402388322264,
+          "dice": 0.9690935476658642,
+          "covered_frac": 0.4475173604928209,
+          "gt_outside_covered": 0,
+          "gt_px": 65861137,
+          "pred_px": 66917836,
+          "native_hw": [
+            25639,
+            16915
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8621436357498169,
+      "n_test_tiles": 398,
+      "best_epoch": 138
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f04",
+      "case": [
+        "21PControl-1"
+      ],
+      "slide_iou_case": 0.9230081633257321,
+      "slide_dice_case": 0.9599628133969463,
+      "per_slide": {
+        "21PControl-1": {
+          "iou": 0.9230081633257321,
+          "dice": 0.9599628133969463,
+          "covered_frac": 0.06817281798756615,
+          "gt_outside_covered": 0,
+          "gt_px": 5681423,
+          "pred_px": 5619421,
+          "native_hw": [
+            18604,
+            25973
+          ]
+        }
+      },
+      "tile_iou_reported": 0.7518929243087769,
+      "n_test_tiles": 35,
+      "best_epoch": 208
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f05",
+      "case": [
+        "FL_22P003-6"
+      ],
+      "slide_iou_case": 0.9398965776580805,
+      "slide_dice_case": 0.9690172027549641,
+      "per_slide": {
+        "FL_22P003-6_1of2": {
+          "iou": 0.9508587499281207,
+          "dice": 0.9748104520259655,
+          "covered_frac": 0.3010671272381313,
+          "gt_outside_covered": 0,
+          "gt_px": 26423018,
+          "pred_px": 26637164,
+          "native_hw": [
+            14829,
+            21265
+          ]
+        },
+        "FL_22P003-6_2of2": {
+          "iou": 0.9265599151830582,
+          "dice": 0.9618801968014768,
+          "covered_frac": 0.2273341227937958,
+          "gt_outside_covered": 16963,
+          "gt_px": 21820405,
+          "pred_px": 21249597,
+          "native_hw": [
+            16678,
+            22186
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8487806543707848,
+      "n_test_tiles": 297,
+      "best_epoch": 160
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f06",
+      "case": [
+        "AJKV056-8"
+      ],
+      "slide_iou_case": 0.9312192552271671,
+      "slide_dice_case": 0.9643848078944602,
+      "per_slide": {
+        "AJKV056-8": {
+          "iou": 0.9312192552271671,
+          "dice": 0.9643848078944602,
+          "covered_frac": 0.2714029682673378,
+          "gt_outside_covered": 0,
+          "gt_px": 19910906,
+          "pred_px": 19840108,
+          "native_hw": [
+            14835,
+            22134
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8197523653507233,
+      "n_test_tiles": 149,
+      "best_epoch": 162
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f07",
+      "case": [
+        "17P645-1"
+      ],
+      "slide_iou_case": 0.8142881376987079,
+      "slide_dice_case": 0.8976392677423036,
+      "per_slide": {
+        "17P645-1": {
+          "iou": 0.8142881376987079,
+          "dice": 0.8976392677423036,
+          "covered_frac": 0.11674701465570034,
+          "gt_outside_covered": 0,
+          "gt_px": 12138987,
+          "pred_px": 13668048,
+          "native_hw": [
+            24130,
+            35178
+          ]
+        }
+      },
+      "tile_iou_reported": 0.6442857086658478,
+      "n_test_tiles": 63,
+      "best_epoch": 159
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f08",
+      "case": [
+        "AJK056-10"
+      ],
+      "slide_iou_case": 0.926169659286242,
+      "slide_dice_case": 0.9616698662250155,
+      "per_slide": {
+        "AJK056-10-2of2": {
+          "iou": 0.9230771485810827,
+          "dice": 0.9600001219526353,
+          "covered_frac": 0.44466363057910757,
+          "gt_outside_covered": 10046,
+          "gt_px": 29847390,
+          "pred_px": 29847917,
+          "native_hw": [
+            23713,
+            14841
+          ]
+        },
+        "AJKV056-10-1-of-2": {
+          "iou": 0.9293537369725632,
+          "dice": 0.9633834575414402,
+          "covered_frac": 0.2680139804997445,
+          "gt_outside_covered": 0,
+          "gt_px": 29379259,
+          "pred_px": 28788576,
+          "native_hw": [
+            22131,
+            14837
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8116810321807861,
+      "n_test_tiles": 368,
+      "best_epoch": 254
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f09",
+      "case": [
+        "AJKY121-7-2"
+      ],
+      "slide_iou_case": 0.8998374996565656,
+      "slide_dice_case": 0.9472783854611034,
+      "per_slide": {
+        "AJKY121-7-2": {
+          "iou": 0.8998374996565656,
+          "dice": 0.9472783854611034,
+          "covered_frac": 0.42415344697288465,
+          "gt_outside_covered": 0,
+          "gt_px": 20077150,
+          "pred_px": 19890670,
+          "native_hw": [
+            14847,
+            21936
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8122391104698181,
+      "n_test_tiles": 230,
+      "best_epoch": 257
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f10",
+      "case": [
+        "21PControl-11"
+      ],
+      "slide_iou_case": 0.9550414821845871,
+      "slide_dice_case": 0.9770038036404344,
+      "per_slide": {
+        "21PControl-11-1of2": {
+          "iou": 0.9640522639390248,
+          "dice": 0.9816971591230063,
+          "covered_frac": 0.5090062560153994,
+          "gt_outside_covered": 0,
+          "gt_px": 234031690,
+          "pred_px": 227209822,
+          "native_hw": [
+            25975,
+            35168
+          ]
+        },
+        "21PControl-11-2of2": {
+          "iou": 0.944741946793533,
+          "dice": 0.9715859200252374,
+          "covered_frac": 0.28402422897412927,
+          "gt_outside_covered": 0,
+          "gt_px": 203737532,
+          "pred_px": 195822616,
+          "native_hw": [
+            33344,
+            42535
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8802558992590223,
+      "n_test_tiles": 527,
+      "best_epoch": 120
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f11",
+      "case": [
+        "17P391_7A"
+      ],
+      "slide_iou_case": 0.9896797303522306,
+      "slide_dice_case": 0.9948131000731749,
+      "per_slide": {
+        "17P391_7A": {
+          "iou": 0.9896797303522306,
+          "dice": 0.9948131000731749,
+          "covered_frac": 0.23566182357782428,
+          "gt_outside_covered": 0,
+          "gt_px": 55210712,
+          "pred_px": 55306747,
+          "native_hw": [
+            18473,
+            23969
+          ]
+        }
+      },
+      "tile_iou_reported": 0.9453556388616562,
+      "n_test_tiles": 155,
+      "best_epoch": 120
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f12",
+      "case": [
+        "21PControl-9"
+      ],
+      "slide_iou_case": 0.9904607926570276,
+      "slide_dice_case": 0.9952075381850457,
+      "per_slide": {
+        "21PControl-9-1of2": {
+          "iou": 0.9851867227122716,
+          "dice": 0.9925380937126711,
+          "covered_frac": 0.31136804632173215,
+          "gt_outside_covered": 0,
+          "gt_px": 56656824,
+          "pred_px": 56744895,
+          "native_hw": [
+            18514,
+            23332
+          ]
+        },
+        "21PControl-9-2of2": {
+          "iou": 0.9915309085089191,
+          "dice": 0.9957474466226478,
+          "covered_frac": 0.5075912200774277,
+          "gt_outside_covered": 0,
+          "gt_px": 280182758,
+          "pred_px": 280504149,
+          "native_hw": [
+            24136,
+            37007
+          ]
+        }
+      },
+      "tile_iou_reported": 0.9368826380142798,
+      "n_test_tiles": 504,
+      "best_epoch": 137
+    },
+    {
+      "run": "k-fold-bnaug-2026-10-17-f13",
+      "case": [
+        "AJKY121-9"
+      ],
+      "slide_iou_case": 0.9518315787357239,
+      "slide_dice_case": 0.9753214253785787,
+      "per_slide": {
+        "AJKY121-9-1": {
+          "iou": 0.9491436156250007,
+          "dice": 0.973908344173658,
+          "covered_frac": 0.3291196535673096,
+          "gt_outside_covered": 0,
+          "gt_px": 52828963,
+          "pred_px": 51689739,
+          "native_hw": [
+            27485,
+            18514
+          ]
+        },
+        "AJKY121-9-2": {
+          "iou": 0.9543259180315795,
+          "dice": 0.9766292400121143,
+          "covered_frac": 0.5381320737921793,
+          "gt_outside_covered": 0,
+          "gt_px": 56269667,
+          "pred_px": 56661791,
+          "native_hw": [
+            25678,
+            14840
+          ]
+        }
+      },
+      "tile_iou_reported": 0.8585708087140863,
+      "n_test_tiles": 440,
+      "best_epoch": 169
+    }
+  ]
+}
