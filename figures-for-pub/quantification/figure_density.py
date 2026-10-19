@@ -15,7 +15,7 @@ The effect a band's error is measured against is the near band minus the deep
 band ON THE ANNOTATION, per species, so it is a property of the biology and not
 of the arm being judged.
 
-rho is normalised per slide by `scale`, the channel ratio over the tissue
+rho is normalised per slide by `scale`, the channel ratio over the foreground
 outside the mask. Under the ratio of sums that put the union of bands at exactly
 0.5; a mean of per-pixel ratios is not pinned there, so no reference line is
 drawn. Split by species because that spread would otherwise swamp the comparison.
@@ -62,7 +62,7 @@ PANEL_TITLE = 13.0
 SPECIES = (('A. Pig', lambda s: 'P' in s), ('B. Human', lambda s: 'P' not in s))
 
 # Dropped from the figure and from every statistic. The measurement is a mean of
-# per-pixel ratios, and on this section 98% of tissue pixels sit at exactly zero
+# per-pixel ratios, and on this section 98% of foreground pixels sit at exactly zero
 # in MYL4 -- see EXCLUSIONS.md beside this file.
 EXCLUDED = ('AJKY121-8-2',)
 
@@ -238,7 +238,7 @@ def main():
         rows += r
         pending.append((ax, g))
 
-    fig.supylabel('MYL4 intensity normalised to total tissue intensity  $\\rho$',
+    fig.supylabel('Per-pixel MYL4 share of section intensity  $\\rho$',
                   fontsize=AXIS_TITLE, color=INK)
     fig.supxlabel('Depth into myocardium', fontsize=AXIS_TITLE, color=INK)
     axes[1].tick_params(left=False, labelleft=False)

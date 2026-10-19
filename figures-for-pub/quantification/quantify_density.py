@@ -1,9 +1,9 @@
 """Relative MYL4 density by depth into myocardium, per algorithm.md.
 
-    rho_px = mean over pixels of  g / (g + scale * r)   over band AND tissue
+    rho_px = mean over pixels of  g / (g + scale * r)   over band AND foreground
 
 G is the MYL4 channel, R the counterstain, and `scale` is sum(G)/sum(R) over
-the tissue outside the mask, which cancels the per-slide channel gain. The mask
+the foreground outside the mask, which cancels the per-slide channel gain. The mask
 is kept out of that reference because it holds the cavity.
 
 One pixel, one vote. The ratio of sums this replaced was intensity-weighted, so
@@ -19,7 +19,7 @@ Bands are exclusive rings outward from the mask boundary -- 0-99, 100-199, 200+
 um. The interior is at zero distance, so it falls in no ring.
 
 ARMS differ ONLY in the mask those rings grow from. The image, the Otsu
-threshold and the tissue mask are per-slide rather than per-arm, so they are
+threshold and the foreground mask are per-slide rather than per-arm, so they are
 computed once and shared: adding an arm costs a distance transform, not another
 pass over a gigapixel TIFF.
 
@@ -58,9 +58,9 @@ from slide_level_metrics import to_native         # noqa: E402
 # boundary; None is unbounded
 BANDS = [('0-99 um', 0.0, 100.0), ('100-199 um', 100.0, 200.0), ('>200 um', 200.0, None)]
 CLOSE_RADIUS = 8        # dilate-erode kernel radius, px
-ISLAND_FRAC = 0.001     # tissue: drop components under this share of the largest
+ISLAND_FRAC = 0.001     # foreground: drop components under this share of the largest
 PRED_ISLAND_FRAC = 0.01  # same for a segmentation, which is one or two objects
-CLIP_PCT = 95           # bright tail capped here before Otsu; see otsu_tissue_mask
+CLIP_PCT = 95           # bright tail capped here before Otsu; see otsu_foreground_mask
 
 QC_SIDE = 760           # long side of one QC panel, px
 QC_TARGET_MEAN = 110.0  # QC renders only; measurement never sees this gain
@@ -110,16 +110,16 @@ def find(raw_dir, stem, kind):
 
 
 # ---------------------------------------------------------------------------
-# Tissue and bands
+# Foreground and bands
 # ---------------------------------------------------------------------------
 
 def channel_mean(R, G, B):
-    """Not the red channel: which fluorophore carries the tissue varies by
+    """Not the red channel: which fluorophore carries the section varies by
     slide, and red finds only the staining rim on 17P391_7A."""
     return ((R.astype(np.uint16) + G + B) // 3).astype(np.uint8)
 
 
-def otsu_tissue_mask(image, scanned):
+def otsu_foreground_mask(image, scanned):
     """Otsu over `image`, brighter class is foreground. Unscanned canvas stays
     out of the histogram, and the bright tail is capped at CLIP_PCT first: a few
     saturated pixels otherwise drag the threshold to 46 instead of 5. The
@@ -135,7 +135,7 @@ def otsu_tissue_mask(image, scanned):
 
 
 def close_mask(mask, radius=CLOSE_RADIUS):
-    """Dilate then erode: fills speckle without growing the tissue outline."""
+    """Dilate then erode: fills speckle without growing the foreground outline."""
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1,) * 2)
     return cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, k).astype(bool)
 
@@ -157,10 +157,10 @@ def drop_islands(mask, frac=ISLAND_FRAC, with_removed=True):
     return kept, removed, int(n - 1 - len(keep))
 
 
-def rings(mask, um_per_px, tissue):
+def rings(mask, um_per_px, foreground):
     """Exclusive depth rings outward from the mask boundary, each already
-    narrowed to tissue. Narrowed here, once: three call sites want the same
-    region and every `band & tissue` is a full-frame bool array."""
+    narrowed to foreground. Narrowed here, once: three call sites want the same
+    region and every `band & foreground` is a full-frame bool array."""
     # thresholds converted to pixels rather than the field to microns: scaling
     # the field would allocate a second full-size float32
     dist = cv2.distanceTransform((~mask).astype(np.uint8), cv2.DIST_L2, 5)
@@ -169,7 +169,7 @@ def rings(mask, um_per_px, tissue):
         band = dist > 0 if lo == 0 else dist >= lo / um_per_px
         if hi is not None:
             band &= dist < hi / um_per_px
-        band &= tissue
+        band &= foreground
         out.append((label, band))
     return out
 
@@ -223,7 +223,7 @@ def rho_per_pixel(G, R, region, scale=1.0, rows=512):
 def measure(G, R, band_masks):
     """rho per band, and the `scale` the bands share.
 
-    scale is built from the bands TOGETHER, which is the tissue outside the
+    scale is built from the bands TOGETHER, which is the foreground outside the
     mask: the mask holds the cavity, and averaging that in would put background
     into the reference.
     """
@@ -257,10 +257,10 @@ ARMS = {
     'predicted':    lambda a, stem, ctx: _npz(a.predictions, stem),
     'SAM':          lambda a, stem, ctx: _npz(Path(a.sam_dir) / 'sam', stem),
     'microSAM':     lambda a, stem, ctx: _npz(Path(a.sam_dir) / 'microsam', stem),
-    'ROI - tissue': lambda a, stem, ctx: to_native(
+    'ROI - foreground': lambda a, stem, ctx: to_native(
         torch.load(Path(a.data_dir) / 'images' / stem / f'roi_{stem}.pt',
                    weights_only=True).squeeze(0).numpy() > 0.5, *ctx['shape']
-    ) & ~ctx['tissue'],
+    ) & ~ctx['foreground'],
 }
 
 
@@ -330,7 +330,7 @@ def main():
     cfg = json.loads((ROOT / 'config.json').read_text())
     ap.add_argument('--raw-dir', default=cfg['preprocess']['raw_image_directory'])
     ap.add_argument('--data-dir', default=str(ROOT / cfg['data_loader']['args']['data_dir']),
-                    help='holds roi_<stem>.pt, for the ROI - tissue arm')
+                    help='holds roi_<stem>.pt, for the ROI - foreground arm')
     ap.add_argument('--metrics', default=str(ROOT / 'figures-for-pub' / 'model-baseline'
                                              / 'k-fold-bnaug-2026-10-17_slide_metrics.json'),
                     help='names the slides to measure')
@@ -345,8 +345,8 @@ def main():
     ap.add_argument('--qc-dir', default=None,
                     help='write a per-slide quality-assurance sheet there')
     ap.add_argument('--global-only', action='store_true',
-                    help='tissue selection and whole-foreground rho only. Needs no '
-                         'voxel size, so tissue selection can be checked before the '
+                    help='foreground selection and whole-foreground rho only. Needs no '
+                         'voxel size, so foreground selection can be checked before the '
                          'microns/pixel table is filled in.')
     ap.add_argument('--slides', nargs='*', default=None)
     a = ap.parse_args()
@@ -384,37 +384,37 @@ def main():
             panels.append(('ground-truth annotation',
                            tint(view, shrink(gt, size), (80, 150, 255))))
 
-        m = otsu_tissue_mask(channel_mean(R, G, B), scanned)
+        m = otsu_foreground_mask(channel_mean(R, G, B), scanned)
         if qc:
             panels.append(('1. Otsu on channel mean', shrink(m, size)))
         m = close_mask(m)
         if qc:
             panels.append((f'2. dilate-erode r={CLOSE_RADIUS}', shrink(m, size)))
-        tissue, removed, dropped = drop_islands(m)
+        foreground, removed, dropped = drop_islands(m)
         if qc:
-            grey = np.stack([shrink(tissue, size).astype(np.uint8) * 255] * 3, -1)
+            grey = np.stack([shrink(foreground, size).astype(np.uint8) * 255] * 3, -1)
             panels.append((f'3. islands dropped ({dropped}, red)',
                            tint(grey, shrink(removed, size), (230, 60, 60), 1.0)))
         del m
 
-        g_rho, _, _, g_n = rho_per_pixel(G, R, tissue)
-        gt_tissue = float((gt & tissue).sum() / max(1, gt.sum()))
+        g_rho, _, _, g_n = rho_per_pixel(G, R, foreground)
+        gt_foreground = float((gt & foreground).sum() / max(1, gt.sum()))
         gt_unscanned = float((gt & ~scanned).sum() / max(1, gt.sum()))
-        print(f'  {stem:<22} tissue {tissue.mean()*100:5.1f}%  -{dropped} islands   '
-              f'gt tissue {gt_tissue*100:5.1f}%  gt unscanned {gt_unscanned*100:5.1f}%   '
+        print(f'  {stem:<22} foreground {foreground.mean()*100:5.1f}%  -{dropped} islands   '
+              f'gt foreground {gt_foreground*100:5.1f}%  gt unscanned {gt_unscanned*100:5.1f}%   '
               f'global rho {g_rho:.4f}')
         summary.append({'slide': stem, 'case': case_id(stem),
-                        'tissue_frac': float(tissue.mean()), 'islands_dropped': dropped,
-                        'gt_tissue_frac': gt_tissue, 'gt_unscanned_frac': gt_unscanned,
+                        'foreground_frac': float(foreground.mean()), 'islands_dropped': dropped,
+                        'gt_foreground_frac': gt_foreground, 'gt_unscanned_frac': gt_unscanned,
                         'global_rho': g_rho, 'global_px': g_n})
 
         if not a.global_only:
             um = (voxel.get(stem) or {}).get('um_per_px')
             if not um:
                 raise SystemExit(f'{stem}: no um_per_px in {Path(a.voxel).name}')
-            ctx = {'shape': R.shape, 'tissue': tissue}
+            ctx = {'shape': R.shape, 'foreground': foreground}
             for arm in a.arms:
-                band_masks = rings(arm_mask(arm, a, stem, ctx), float(um), tissue)
+                band_masks = rings(arm_mask(arm, a, stem, ctx), float(um), foreground)
                 for rec in measure(G, R, band_masks):
                     rows.append({'slide': stem, 'case': case_id(stem), 'arm': arm,
                                  **rec, 'um_per_px': um})
@@ -429,18 +429,18 @@ def main():
 
         if qc:
             qc_sheet(qc / f'{stem}.png', stem, panels,
-                     f'tissue {tissue.mean()*100:.1f}% of frame   '
-                     f'annotation {gt_tissue*100:.0f}% tissue, {gt_unscanned*100:.0f}% '
+                     f'foreground {foreground.mean()*100:.1f}% of frame   '
+                     f'annotation {gt_foreground*100:.0f}% foreground, {gt_unscanned*100:.0f}% '
                      f'unscanned   global rho {g_rho:.4f}   ({RINGS_NOTE})')
             print(f'      qc -> {qc / f"{stem}.png"}')
 
-        del R, G, B, gt, scanned, tissue, removed, panels
+        del R, G, B, gt, scanned, foreground, removed, panels
 
-    with open(HERE / 'tissue_summary.csv', 'w', newline='') as f:
+    with open(HERE / 'foreground_summary.csv', 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(summary[0]))
         w.writeheader()
         w.writerows(summary)
-    print(f'\nwrote {HERE / "tissue_summary.csv"}  ({len(summary)} slides)')
+    print(f'\nwrote {HERE / "foreground_summary.csv"}  ({len(summary)} slides)')
 
     if rows:
         with open(a.out, 'w', newline='') as f:
