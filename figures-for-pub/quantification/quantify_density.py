@@ -1,22 +1,36 @@
 """Relative MYL4 density by depth into myocardium, per algorithm.md.
 
-    rho = sum(G) / (sum(G) + scale * sum(R))    over band AND tissue
+    rho_px = mean over pixels of  g / (g + scale * r)   over band AND tissue
 
-G is the MYL4 channel, R the counterstain, and `scale` that same ratio taken
-over the tissue outside the mask, which cancels the per-slide channel gain. The
-mask is kept out of that reference because it holds the cavity.
+G is the MYL4 channel, R the counterstain, and `scale` is sum(G)/sum(R) over
+the tissue outside the mask, which cancels the per-slide channel gain. The mask
+is kept out of that reference because it holds the cavity.
 
-Measured twice per slide, with the bands grown from the manual annotation and
-from the held-out prediction, so the arms differ only in that mask. Bands are
-exclusive rings outward from its boundary -- 0-99, 100-199, 200+ um -- and the
-interior is at zero distance, so it falls in no ring.
+One pixel, one vote. The ratio of sums this replaced was intensity-weighted, so
+a handful of bright pixels could carry a band, and its >200 um value was pinned
+near 0.5 by construction -- that band holds nearly every pixel the normaliser
+is built from.
+
+`scale` stays inside the per-pixel ratio: unlike a ratio of sums, a mean of
+ratios is NOT invariant to a per-channel gain. rho_px_raw is the same measure
+without it, carried so that cost is visible rather than assumed.
+
+Bands are exclusive rings outward from the mask boundary -- 0-99, 100-199, 200+
+um. The interior is at zero distance, so it falls in no ring.
+
+ARMS differ ONLY in the mask those rings grow from. The image, the Otsu
+threshold and the tissue mask are per-slide rather than per-arm, so they are
+computed once and shared: adding an arm costs a distance transform, not another
+pass over a gigapixel TIFF.
 
 algorithm.md's background subtraction is not implemented; these are raw 8-bit
-intensities.
+intensities, so each slide carries whatever zero point its scan had. See
+EXCLUSIONS.md.
 
 Usage:
-    python quantification/quantify_density.py --global-only --qc-dir qc/
-    python quantification/quantify_density.py --qc-dir qc/
+    python figures-for-pub/quantification/quantify_density.py --global-only --qc-dir qc/
+    python figures-for-pub/quantification/quantify_density.py --qc-dir qc/
+    python figures-for-pub/quantification/quantify_density.py --arms "ground truth" SAM
 """
 import argparse
 import csv
@@ -30,19 +44,22 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
+import torch
 
 HERE = Path(__file__).resolve().parent
 ROOT = next(p for p in HERE.parents if (p / 'train.py').exists())
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'utils'))
 
 from data_loader.data_loaders import case_id      # noqa: E402
+from slide_level_metrics import to_native         # noqa: E402
 
 # (label, inclusive lower bound, exclusive upper bound) in microns from the mask
 # boundary; None is unbounded
 BANDS = [('0-99 um', 0.0, 100.0), ('100-199 um', 100.0, 200.0), ('>200 um', 200.0, None)]
 CLOSE_RADIUS = 8        # dilate-erode kernel radius, px
 ISLAND_FRAC = 0.001     # tissue: drop components under this share of the largest
-PRED_ISLAND_FRAC = 0.01  # same for the predicted mask, which is a segmentation
+PRED_ISLAND_FRAC = 0.01  # same for a segmentation, which is one or two objects
 CLIP_PCT = 95           # bright tail capped here before Otsu; see otsu_tissue_mask
 
 QC_SIDE = 760           # long side of one QC panel, px
@@ -140,8 +157,10 @@ def drop_islands(mask, frac=ISLAND_FRAC, with_removed=True):
     return kept, removed, int(n - 1 - len(keep))
 
 
-def rings(mask, um_per_px):
-    """Exclusive depth rings outward from the mask boundary, in microns."""
+def rings(mask, um_per_px, tissue):
+    """Exclusive depth rings outward from the mask boundary, each already
+    narrowed to tissue. Narrowed here, once: three call sites want the same
+    region and every `band & tissue` is a full-frame bool array."""
     # thresholds converted to pixels rather than the field to microns: scaling
     # the field would allocate a second full-size float32
     dist = cv2.distanceTransform((~mask).astype(np.uint8), cv2.DIST_L2, 5)
@@ -150,20 +169,107 @@ def rings(mask, um_per_px):
         band = dist > 0 if lo == 0 else dist >= lo / um_per_px
         if hi is not None:
             band &= dist < hi / um_per_px
+        band &= tissue
         out.append((label, band))
     return out
 
 
-def rho(G, R, region, scale=1.0):
-    """MYL4 share over a region, and the sums behind it. `scale` is the tissue
-    foreground's MYL4-to-red ratio, which cancels per-slide channel gain."""
+def channel_sums(G, R, region):
+    """Total MYL4, total counterstain, and pixel count over a region.
+
+    Only the sums: the ratio-of-sums rho they used to form is gone. It was
+    intensity-weighted, so a few bright pixels decided a band, and its >200 um
+    value was pinned near 0.5 by construction. What the sums are still for is
+    `scale`, which is a ratio of totals by definition.
+    """
     n = int(np.count_nonzero(region))
     if n == 0:
-        return float('nan'), 0, 0, 0
-    g = int(G[region].sum(dtype=np.int64))
-    r = int(R[region].sum(dtype=np.int64))
-    rs = r * scale
-    return (g / (g + rs) if (g + rs) else float('nan')), g, r, n
+        return 0, 0, 0
+    return (int(G[region].sum(dtype=np.int64)),
+            int(R[region].sum(dtype=np.int64)), n)
+
+
+def rho_per_pixel(G, R, region, scale=1.0, rows=512):
+    """Mean of per-pixel g / (g + scale*r), one vote per pixel.
+
+    Also returned at scale 1.0, since a per-pixel ratio -- unlike a ratio of
+    sums -- is not invariant to the per-channel gain.
+
+    Row blocks because the >200 um region reaches ~250M px and a float32 copy
+    does not fit beside the three channels. g = r = 0 has no ratio and is
+    counted, not imputed.
+    """
+    total = total_raw = 0.0
+    n = undefined = 0
+    for y in range(0, region.shape[0], rows):
+        sl = slice(y, y + rows)
+        m = region[sl]
+        if not m.any():
+            continue
+        g = G[sl][m].astype(np.float32)
+        r = R[sl][m].astype(np.float32)
+        d, d_raw = g + scale * r, g + r
+        ok = d > 0
+        total += float(np.divide(g[ok], d[ok]).sum(dtype=np.float64))
+        total_raw += float(np.divide(g[ok], d_raw[ok]).sum(dtype=np.float64))
+        n += int(np.count_nonzero(ok))
+        undefined += int(ok.size - np.count_nonzero(ok))
+        del g, r, d, d_raw, ok
+    if n == 0:
+        return float('nan'), float('nan'), 0, undefined
+    return total / n, total_raw / n, n, undefined
+
+
+def measure(G, R, band_masks):
+    """rho per band, and the `scale` the bands share.
+
+    scale is built from the bands TOGETHER, which is the tissue outside the
+    mask: the mask holds the cavity, and averaging that in would put background
+    into the reference.
+    """
+    sums = [channel_sums(G, R, band) for _, band in band_masks]
+    gf, rf = (sum(s[i] for s in sums) for i in (0, 1))
+    scale = gf / rf if rf else 1.0
+    out = []
+    for (label, band), (g, r, n) in zip(band_masks, sums):
+        px, px_raw, _, undefined = rho_per_pixel(G, R, band, scale)
+        out.append({'band': label, 'rho_px': px, 'rho_px_raw': px_raw,
+                    'g_sum': g, 'r_sum': r, 'n_px': n,
+                    'n_undefined': undefined, 'scale': scale})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Arms. Each returns a native-resolution mask for the rings to grow from.
+# Every arm but the annotation gets the same island filter, so a difference
+# between two arms cannot come from post-processing.
+# ---------------------------------------------------------------------------
+
+def _npz(directory, stem):
+    f = Path(directory) / f'{stem}.npz'
+    if not f.exists():
+        raise SystemExit(f'{stem}: no mask at {f}')
+    return np.load(f)['pred']
+
+
+ARMS = {
+    'ground truth': lambda a, stem, ctx: load_mask(find(a.raw_dir, stem, 'mask')),
+    'predicted':    lambda a, stem, ctx: _npz(a.predictions, stem),
+    'SAM':          lambda a, stem, ctx: _npz(Path(a.sam_dir) / 'sam', stem),
+    'microSAM':     lambda a, stem, ctx: _npz(Path(a.sam_dir) / 'microsam', stem),
+    'ROI - tissue': lambda a, stem, ctx: to_native(
+        torch.load(Path(a.data_dir) / 'images' / stem / f'roi_{stem}.pt',
+                   weights_only=True).squeeze(0).numpy() > 0.5, *ctx['shape']
+    ) & ~ctx['tissue'],
+}
+
+
+def arm_mask(name, a, stem, ctx):
+    mask = ARMS[name](a, stem, ctx)
+    if mask.shape != ctx['shape']:
+        raise SystemExit(f'{stem}/{name}: {mask.shape} != {ctx["shape"]}')
+    return mask if name == 'ground truth' \
+        else drop_islands(mask, PRED_ISLAND_FRAC, False)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -221,14 +327,21 @@ def qc_sheet(path, stem, panels, note, cols=4):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--raw-dir',
-                    default=json.loads((ROOT / 'config.json').read_text())
-                    ['preprocess']['raw_image_directory'])
+    cfg = json.loads((ROOT / 'config.json').read_text())
+    ap.add_argument('--raw-dir', default=cfg['preprocess']['raw_image_directory'])
+    ap.add_argument('--data-dir', default=str(ROOT / cfg['data_loader']['args']['data_dir']),
+                    help='holds roi_<stem>.pt, for the ROI - tissue arm')
     ap.add_argument('--metrics', default=str(ROOT / 'figures-for-pub' / 'model-baseline'
-                                             / 'k-fold-baseline-2026-09-02_slide_metrics.json'))
+                                             / 'k-fold-bnaug-2026-10-17_slide_metrics.json'),
+                    help='names the slides to measure')
     ap.add_argument('--voxel', default=str(HERE / 'microns_per_pixel.json'))
     ap.add_argument('--predictions', default=str(HERE / 'predictions'))
+    ap.add_argument('--sam-dir', default=str(HERE / 'masks'),
+                    help='written by export_sam_masks.py')
     ap.add_argument('--out', default=str(HERE / 'density.csv'))
+    ap.add_argument('--arms', nargs='*', default=['ground truth', 'predicted'],
+                    choices=list(ARMS), metavar='ARM',
+                    help=f'any of: {", ".join(ARMS)}')
     ap.add_argument('--qc-dir', default=None,
                     help='write a per-slide quality-assurance sheet there')
     ap.add_argument('--global-only', action='store_true',
@@ -273,7 +386,7 @@ def main():
 
         m = otsu_tissue_mask(channel_mean(R, G, B), scanned)
         if qc:
-            panels.append(('1. Otsu on red', shrink(m, size)))
+            panels.append(('1. Otsu on channel mean', shrink(m, size)))
         m = close_mask(m)
         if qc:
             panels.append((f'2. dilate-erode r={CLOSE_RADIUS}', shrink(m, size)))
@@ -284,7 +397,7 @@ def main():
                            tint(grey, shrink(removed, size), (230, 60, 60), 1.0)))
         del m
 
-        g_rho, _, _, g_n = rho(G, R, tissue)
+        g_rho, _, _, g_n = rho_per_pixel(G, R, tissue)
         gt_tissue = float((gt & tissue).sum() / max(1, gt.sum()))
         gt_unscanned = float((gt & ~scanned).sum() / max(1, gt.sum()))
         print(f'  {stem:<22} tissue {tissue.mean()*100:5.1f}%  -{dropped} islands   '
@@ -299,38 +412,20 @@ def main():
             um = (voxel.get(stem) or {}).get('um_per_px')
             if not um:
                 raise SystemExit(f'{stem}: no um_per_px in {Path(a.voxel).name}')
-            for arm in ('ground truth', 'predicted'):
-                if arm == 'ground truth':
-                    mask = gt
-                else:
-                    npz = Path(a.predictions) / f'{stem}.npz'
-                    if not npz.exists():
-                        raise SystemExit(f'{stem}: no prediction at {npz}')
-                    mask = np.load(npz)['pred']
-                    if mask.shape != R.shape:
-                        raise SystemExit(f'{stem}: prediction {mask.shape} != {R.shape}')
-                    mask, _, gone = drop_islands(mask, PRED_ISLAND_FRAC, False)
-                    print(f'      prediction: -{gone} islands')
-                band_masks = rings(mask, float(um))
-                # the bands together are the tissue outside the mask, which is
-                # the normaliser: the mask holds the cavity, and averaging that
-                # in would put background into the reference
-                sums = [rho(G, R, band & tissue)[1:] for _, band in band_masks]
-                gf, rf = (sum(s[i] for s in sums) for i in (0, 1))
-                scale = gf / rf if rf else 1.0
-                for (label, _), (g, r, n) in zip(band_masks, sums):
-                    rs = r * scale
-                    value = g / (g + rs) if (g + rs) else float('nan')
+            ctx = {'shape': R.shape, 'tissue': tissue}
+            for arm in a.arms:
+                band_masks = rings(arm_mask(arm, a, stem, ctx), float(um), tissue)
+                for rec in measure(G, R, band_masks):
                     rows.append({'slide': stem, 'case': case_id(stem), 'arm': arm,
-                                 'band': label, 'rho': value, 'g_sum': g, 'r_sum': r,
-                                 'n_px': n, 'um_per_px': um, 'scale': scale})
-                    print(f'      {arm:<13} {label:<11} rho {value:.4f}  n {n:>13,}')
+                                 **rec, 'um_per_px': um})
+                    print(f'      {arm:<13} {rec["band"]:<11} '
+                          f'rho_px {rec["rho_px"]:.4f}  n {rec["n_px"]:>13,}')
                 if qc:
                     canvas = np.zeros((size[1], size[0], 3), np.uint8)
                     for (_, band), colour in zip(band_masks, BAND_COLOURS):
-                        canvas[shrink(band & tissue, size)] = colour
+                        canvas[shrink(band, size)] = colour
                     panels.append((f'rings, {arm}', canvas))
-                del band_masks, mask
+                del band_masks
 
         if qc:
             qc_sheet(qc / f'{stem}.png', stem, panels,

@@ -3,17 +3,27 @@
 Geometry and theme follow refrence-figures-hillestad/pig_vs_human_PF_density_Fig1.R,
 with the paired factor changed from pig/human to ground truth/predicted.
 
-Agreement per band is Lin's concordance. No significance test: the claim is
-that the two arms measure the same thing, which a difference test can only fail
-to reject, and it scores consistency over closeness -- it ranked the visibly
-better human agreement as the significant one.
+Agreement per band is Bland-Altman: bias, 95% limits of agreement, and mean
+absolute difference as a share of the biological effect. Not Lin's concordance,
+which divides by the between-slide spread and so reports a signal-to-noise
+ratio rather than closeness -- it reads a band as poor agreement when the effect
+is small, even where the absolute error did not move. No significance test: the
+claim is that the two arms measure the same thing, which a difference test can
+only fail to reject.
 
-rho is normalised per slide, so 0.5 is the balance of the tissue outside the
-mask. Split by species because that spread would otherwise swamp the comparison.
+The effect a band's error is measured against is the near band minus the deep
+band ON THE ANNOTATION, per species, so it is a property of the biology and not
+of the arm being judged.
 
-Sections with a known acquisition problem are drawn in grey and left in the
-plot, but the CCC on the figure excludes them; ccc_all in the statistics CSV
-keeps them, and that is the number to quote in the text.
+rho is normalised per slide by `scale`, the channel ratio over the tissue
+outside the mask. Under the ratio of sums that put the union of bands at exactly
+0.5; a mean of per-pixel ratios is not pinned there, so no reference line is
+drawn. Split by species because that spread would otherwise swamp the comparison.
+
+One section is excluded, AJKY121-8-2, and it is named rather than greyed: a
+section is either measurable and plotted, or excluded and listed. Every other
+section is in every statistic. See EXCLUSIONS.md beside this file for the reason
+and the measurement behind it.
 
 Usage:
     python figures-for-pub/quantification/figure_density.py
@@ -51,16 +61,15 @@ PANEL_TITLE = 13.0
 # specimen ids carry a capital P for pig; the human cases are AJK*
 SPECIES = (('A. Pig', lambda s: 'P' in s), ('B. Human', lambda s: 'P' not in s))
 
-EXCLUDED = ()          # nothing dropped; the affected sections are marked instead
+# Dropped from the figure and from every statistic. The measurement is a mean of
+# per-pixel ratios, and on this section 98% of tissue pixels sit at exactly zero
+# in MYL4 -- see EXCLUSIONS.md beside this file.
+EXCLUDED = ('AJKY121-8-2',)
 
-# sections carrying a known acquisition problem. They stay in the figure and in
-# the statistics, drawn with their own marker so a reader can see which points
-# they are rather than having them silently removed.
-MARKED = {
-    '17P391_7A':   ((4, 1, 0), 'Thresholding did not isolate the section'),
-    '17P645-1':    ((5, 1, 0), 'Noise in the ventricle region'),
-    'AJKY121-8-2': ((6, 1, 0), 'MYL4 channel near zero'),
-}
+# Previously held sections drawn in grey and kept in the statistics. Emptied:
+# greying a point asks the reader to discount it while still counting it. A
+# section now either measures or is excluded by name.
+MARKED = {}
 
 DODGE, BOX_WIDTH = 0.52, 0.30
 OVERLAP = 0.40        # adjacent fanned points overlap by this much of a marker
@@ -74,12 +83,18 @@ matplotlib.rcParams.update({
 })
 
 
-def ccc(x, y):
-    """Lin's concordance correlation: 1 is identical, and unlike Pearson it is
-    penalised by a systematic offset rather than only by scatter."""
-    mx, my = x.mean(), y.mean()
-    return float(2 * ((x - mx) * (y - my)).mean()
-                 / (x.var() + y.var() + (mx - my) ** 2))
+LOA_Z = 1.96          # 95% limits of agreement
+
+
+def bland_altman(gt, pred):
+    """Bias and 95% limits of agreement for a paired difference.
+
+    Absolute, in the units of the measurement, so two bands with different
+    spreads stay comparable -- which is the property CCC gives up.
+    """
+    d = gt - pred
+    bias, sd = float(d.mean()), float(d.std(ddof=1))
+    return bias, sd, bias - LOA_Z * sd, bias + LOA_Z * sd, float(np.abs(d).mean())
 
 
 def offsets(values, span, tol):
@@ -103,7 +118,7 @@ def load(path):
     """{band: {arm: {slide: rho}}}, from quantify_density.py's CSV."""
     out = defaultdict(lambda: defaultdict(dict))
     for r in csv.DictReader(open(path)):
-        out[r['band']][r['arm']][r['slide']] = float(r['rho'])
+        out[r['band']][r['arm']][r['slide']] = float(r['rho_px'])
     return out
 
 
@@ -126,24 +141,32 @@ def panel(ax, ax_title, data, slides, lo, hi):
             bp['boxes'][0].set(facecolor=colour, alpha=BOX_ALPHA, edgecolor=BOX_EDGE)
             groups.append((x, paired[arm], colour, marker, slides))
 
-        d = paired['ground truth'] - paired['predicted']
-        # the figure shows agreement over the unmarked sections; every section
-        # is still plotted and still in ccc_all, which is what the text quotes
-        keep = [i for i, s in enumerate(slides) if s not in MARKED]
+        bias, sd, loa_lo, loa_hi, mad = bland_altman(paired['ground truth'],
+                                                     paired['predicted'])
+        # every section, marked ones included: a marker identifies them, it does
+        # not remove them from the statistic
         rows.append({'species': ax_title.split('. ')[1], 'band': band,
-                     'n': len(slides), 'n_unmarked': len(keep),
+                     'n': len(slides),
                      'gt_mean': paired['ground truth'].mean(),
                      'pred_mean': paired['predicted'].mean(),
-                     'mean_difference': d.mean(), 'sd_difference': d.std(ddof=1),
-                     'ccc_all': ccc(paired['ground truth'], paired['predicted']),
-                     'ccc_unmarked': ccc(paired['ground truth'][keep],
-                                         paired['predicted'][keep])})
+                     'bias': bias, 'sd_difference': sd,
+                     'loa_lower': loa_lo, 'loa_upper': loa_hi,
+                     'loa_width': loa_hi - loa_lo,
+                     'mean_abs_difference': mad})
+
+    # near band minus deep band ON THE ANNOTATION: the effect the error is
+    # judged against has to be a property of the biology, not of the arm
+    effect = rows[0]['gt_mean'] - rows[-1]['gt_mean']
+    for r in rows:
+        r['effect'] = effect
+        r['pct_of_effect'] = 100 * r['mean_abs_difference'] / effect if effect else float('nan')
 
     pad = 0.10 * (hi - lo)
     y = hi + 0.45 * pad
     for i, r in enumerate(rows):
-        ax.text(i, y, f"CCC {r['ccc_unmarked']:.3f}", ha='center', va='bottom',
-                fontsize=STAR_TEXT, color=INK_2)
+        ax.text(i, y, f"bias {r['bias']:+.3f}\n95% LoA ±{LOA_Z * r['sd_difference']:.3f}",
+                ha='center', va='bottom', fontsize=STAR_TEXT - 2.0, color=INK_2,
+                linespacing=1.4)
 
     ax.set_xticks(range(len(BANDS)))
     ax.set_xticklabels(LABELS, fontsize=AXIS_TITLE, color=INK)
@@ -151,13 +174,11 @@ def panel(ax, ax_title, data, slides, lo, hi):
     ax.tick_params(axis='y', labelsize=AXIS_TEXT, colors=INK, color=FRAME,
                    width=TICK_LW, length=5)
     ax.set_xlim(-0.65, len(BANDS) - 0.35)
-    ax.set_ylim(lo - pad, hi + 1.1 * pad)
+    ax.set_ylim(lo - pad, hi + 1.9 * pad)
     for sp in ax.spines.values():
         sp.set(visible=True, color=FRAME, linewidth=BORDER_LW)
     ax.grid(axis='y', color=GRID, lw=0.5)
     ax.set_axisbelow(True)
-    # 0.5 is the balance of the tissue the channels were normalised against
-    ax.axhline(0.5, color=FRAME, lw=0.7, ls=(0, (4, 3)), zorder=1, alpha=0.7)
     ax.set_title(f'{ax_title}  (n = {len(slides)})', fontsize=PANEL_TITLE, color=INK,
                  pad=12, loc='left', fontweight='bold')
     return rows, groups
@@ -187,7 +208,7 @@ def draw_points(ax, groups):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--density', default=str(ROOT / 'quantification' / 'density.csv'))
+    ap.add_argument('--density', default=str(HERE / 'density.csv'))
     ap.add_argument('--out', default=str(HERE / 'density-by-depth.pdf'))
     ap.add_argument('--stats', default=str(HERE / 'density_statistics.csv'))
     ap.add_argument('--exclude', nargs='*', default=EXCLUDED,
@@ -248,15 +269,19 @@ def main():
         w.writeheader()
         w.writerows(rows)
     print(f'wrote {a.stats}\n')
-    print(f"  {'species':<8}{'band':<12}{'n':>3}{'gt':>9}{'pred':>9}{'diff':>10}"
-          f"{'sd':>9}{'CCC all':>9}{'CCC unm':>9}")
+    print(f"  {'species':<8}{'band':<12}{'n':>3}{'gt':>9}{'pred':>9}{'bias':>10}"
+          f"{'95% LoA':>20}{'width':>9}{'mean|d|':>9}{'% effect':>10}")
     for r in rows:
         print(f"  {r['species']:<8}{r['band']:<12}{r['n']:>3}{r['gt_mean']:>9.4f}"
-              f"{r['pred_mean']:>9.4f}{r['mean_difference']:>+10.4f}"
-              f"{r['sd_difference']:>9.4f}{r['ccc_all']:>9.3f}"
-              f"{r['ccc_unmarked']:>9.3f}")
-    print(f'\n  CCC all = every section, for the text.  CCC unm = without '
-          f'{", ".join(MARKED)}, which is what the figure shows.')
+              f"{r['pred_mean']:>9.4f}{r['bias']:>+10.4f}"
+              f"{r['loa_lower']:>+10.4f},{r['loa_upper']:>+9.4f}"
+              f"{r['loa_width']:>9.4f}{r['mean_abs_difference']:>9.4f}"
+              f"{r['pct_of_effect']:>9.0f}%")
+    print(f"\n  Excluded: {', '.join(a.exclude) if a.exclude else 'none'}. "
+          '% effect is the mean absolute difference against\n  '
+          "the annotation's own near-minus-deep span: "
+          + '  '.join(f"{r['species']} {r['effect']:.4f}"
+                      for r in rows if r['band'] == BANDS[0]))
 
 
 if __name__ == '__main__':
