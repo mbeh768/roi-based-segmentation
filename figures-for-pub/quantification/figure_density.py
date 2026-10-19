@@ -112,15 +112,6 @@ def agreement(data, slides, species, arms):
     return out
 
 
-def depth_span(data, slides):
-    """Annotation's near minus deep mean rho: the range the measurement covers
-    across depth. A reference point, never a denominator -- it moves with the
-    band edges and differs by species."""
-    near, deep = list(BANDS)[0], list(BANDS)[-1]
-    return float(np.mean([data[near][GT][s] for s in slides])
-                 - np.mean([data[deep][GT][s] for s in slides]))
-
-
 # ---------------------------------------------------------------------------
 # Drawing
 # ---------------------------------------------------------------------------
@@ -184,7 +175,7 @@ def draw_points(ax, groups):
                 markeredgewidth=MARK_EDGE, zorder=3)
 
 
-def draw_table(ax, rows, arms, spans):
+def draw_table(ax, rows, arms):
     """Panel C. Rows laid out from an index, so a group rule is the midpoint
     between two known row positions and cannot land on text."""
     ax.set_axis_off()
@@ -242,10 +233,8 @@ def draw_table(ax, rows, arms, spans):
 
     ax.text(X_BAND, y_of(len(BANDS) * len(compare) - 1) - 0.055,
             'bias = mean(annotation − arm)   ·   '
-            '95% LoA = bias ± 1.96 SD, where an individual section falls   ·   '
-            "Pearson's r is across sections and blind to offset   ·   "
-            'depth span of the annotation (near − deep): '
-            + ',  '.join(f'{s} {v:.3f}' for s, v in spans.items()),
+            '95% LoA = bias ± 1.96 SD   ·   '
+            "Pearson's r is across slides and blind to offset",
             fontsize=TABLE_TEXT - 1.2, color=INK_3)
 
 
@@ -271,12 +260,11 @@ def main():
           f'arms: {", ".join(x[0] for x in arms)}')
 
     by_species = {name: [s for s in slides if belongs(s)] for name, belongs in SPECIES}
-    rows, spans = [], {}
+    rows = []
     for name, members in by_species.items():
         if not members:
             raise SystemExit(f'no slides matched {name}')
         rows += agreement(data, members, name, arms)
-        spans[name] = depth_span(data, members)
 
     # one pair of limits for both panels, so the species are read against the
     # same scale rather than each being re-zoomed to its own range
@@ -308,7 +296,7 @@ def main():
                frameon=False, fontsize=LEGEND_TEXT, labelcolor=INK,
                bbox_to_anchor=(0.5, 0.985))
 
-    draw_table(fig.add_subplot(gs[1, :]), rows, arms, spans)
+    draw_table(fig.add_subplot(gs[1, :]), rows, arms)
     # explicit margins: panel C is positioned text, which tight_layout cannot
     # measure -- it warns and then guesses
     fig.subplots_adjust(left=0.085, right=0.985, top=0.925, bottom=0.025)
@@ -330,7 +318,6 @@ def main():
               f"{r['arm_mean']:>8.4f}{r['bias']:>+9.4f}"
               f"{LOA_Z * r['sd_difference']:>9.4f}{r['mean_abs_difference']:>9.4f}"
               f"{r['pearson_r']:>+8.2f}")
-    print('\n  depth span: ' + ',  '.join(f'{s} {v:.4f}' for s, v in spans.items()))
 
 
 if __name__ == '__main__':
