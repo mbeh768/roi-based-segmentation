@@ -138,6 +138,7 @@ utils/copy_rois.sh
 figures-for-pub/appendix/worst-performer.png
 figures-for-pub/quantification/predictions*
 figures-for-pub/quantification/masks
+figures-for-pub/zoom-figures
 
 # a note to myself for the manuscript, not part of the method
 figures-for-pub/quantification/EXCLUSIONS.md
