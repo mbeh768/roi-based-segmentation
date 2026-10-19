@@ -128,7 +128,7 @@ __MACOSX/
 
 # intermediate planning documents
 repo-cleanup
-quantification/algorithm.md
+figures-for-pub/quantification/algorithm.md
 
 # local ROI staging helper (machine-specific archive path)
 utils/copy_rois.sh
@@ -136,7 +136,11 @@ utils/copy_rois.sh
 # large images
 **/canvases/
 figures-for-pub/appendix/worst-performer.png
-quantification/predictions
+figures-for-pub/quantification/predictions*
+figures-for-pub/quantification/masks
+
+# a note to myself for the manuscript, not part of the method
+figures-for-pub/quantification/EXCLUSIONS.md
 
 # experiments archive
 experiments-archive
