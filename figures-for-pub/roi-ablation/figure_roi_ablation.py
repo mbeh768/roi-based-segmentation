@@ -42,7 +42,7 @@ def panel(ax, label, name, noise, real, lo):
             color=FRAME, rotation=45, rotation_mode='anchor', ha='center', va='top')
 
     up = real > noise
-    for mask, colour, legend in ((up, SERIES, 'ROI input helps'),
+    for mask, colour, legend in ((up, SERIES, 'better with ROI input'),
                                  (~up, MISS, 'better without ROI input')):
         ax.plot(noise[mask], real[mask], 'o', ms=MARK_SIZE, markerfacecolor=colour,
                 markeredgecolor='black', markeredgewidth=MARK_EDGE,
@@ -83,7 +83,10 @@ def main():
     col = lambda d, k: np.array([d[s][k] for s in stems], float)
     panels = (('A. IoU Score', 'IoU', col(abl, 'iou'), col(base, 'iou')),
               ('B. Dice Score', 'Dice', col(abl, 'dice'), col(base, 'dice')))
-    lo = np.floor(min(min(x.min(), y.min()) for _, _, x, y in panels) * 20 - 0.5) / 20
+    # a full 0.05 step below the data, not half: when `lo` lands on a multiple of
+    # the 0.1 tick spacing the first tick sits on the spine and its label runs
+    # into the neighbouring panel's last one
+    lo = np.floor(min(min(x.min(), y.min()) for _, _, x, y in panels) * 20 - 1.0) / 20
 
     fig, axes = plt.subplots(1, 2, figsize=(10.4, 5.6), sharey=True)
     fig.patch.set_facecolor(SURFACE)
