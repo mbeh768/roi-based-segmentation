@@ -1,34 +1,15 @@
-"""Figure: relative MYL4 density by depth, manual annotation against prediction.
+"""Relative MYL4 density by depth, annotation against every arm.
 
-Geometry and theme follow refrence-figures-hillestad/pig_vs_human_PF_density_Fig1.R,
-with the paired factor changed from pig/human to ground truth/predicted.
+load() -> agreement() -> draw_*(). --arms picks the methods, so two arms gives
+the annotation-versus-model figure and five the baseline comparison, from one
+generator. >200 um is tabulated but not plotted: every arm lands within 0.003 of
+the annotation there. AJKY121-8-2 is excluded, see EXCLUSIONS.md.
 
-Agreement per band is Bland-Altman: bias, 95% limits of agreement, and mean
-absolute difference as a share of the biological effect. Not Lin's concordance,
-which divides by the between-slide spread and so reports a signal-to-noise
-ratio rather than closeness -- it reads a band as poor agreement when the effect
-is small, even where the absolute error did not move. No significance test: the
-claim is that the two arms measure the same thing, which a difference test can
-only fail to reject.
+Theme follows refrence-figures-hillestad/pig_vs_human_PF_density_Fig1.R.
 
-The effect a band's error is measured against is the near band minus the deep
-band ON THE ANNOTATION, per species, so it is a property of the biology and not
-of the arm being judged.
-
-rho is normalised per slide by `scale`, the channel ratio over the foreground
-outside the mask. Under the ratio of sums that put the union of bands at exactly
-0.5; a mean of per-pixel ratios is not pinned there, so no reference line is
-drawn. Split by species because that spread would otherwise swamp the comparison.
-
-One section is excluded, AJKY121-8-2, and it is named rather than greyed: a
-section is either measurable and plotted, or excluded and listed. Every other
-section is in every statistic. See EXCLUSIONS.md beside this file for the reason
-and the measurement behind it.
-
-Usage:
     python figures-for-pub/quantification/figure_density.py
+    python figures-for-pub/quantification/figure_density.py --arms "ground truth" predicted
 """
-
 import argparse
 import csv
 from collections import defaultdict
@@ -39,249 +20,317 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
+from scipy.stats import pearsonr
 
 HERE = Path(__file__).resolve().parent
-ROOT = next(p for p in HERE.parents if (p / 'train.py').exists())
 
-# from the reference script's SPECIES_COLORS / SPECIES_SHAPES and theme
-ARMS = (('ground truth', 'Ground truth', '#2B8CBE', 'o'),
-        ('predicted', 'Predicted', '#FF7F0E', 's'))
-BANDS = ['0-99 um', '100-199 um', '>200 um']
-LABELS = ['0–99 µm', '100–199 µm', '>200 µm']
+# annotation and model keep their published colours; the baselines take distinct
+# hues, ordered so adjacent boxes are never the closest pair
+ARMS = (('ground truth',     'Ground truth',          '#2B8CBE', 'o'),
+        ('predicted',        'Model',                 '#FF7F0E', 's'),
+        ('SAM',              'SAM',                   '#4C9F70', '^'),
+        ('microSAM',         'microSAM',              '#8C6BB1', 'D'),
+        ('ROI - foreground', 'ROI − foreground', '#B3553B', 'v'))
+GT = 'ground truth'
+BANDS = {'0-99 um': '0–99 µm', '100-199 um': '100–199 µm', '>200 um': '>200 µm'}
+PLOTTED = ['0-99 um', '100-199 um']
+# specimen ids carry a capital P for pig; the human cases are AJK*
+SPECIES = (('Pig', lambda s: 'P' in s), ('Human', lambda s: 'P' not in s))
+EXCLUDED = ('AJKY121-8-2',)
+LOA_Z = 1.96
 
-INK, INK_2 = '#111111', '#52514e'
-FLAG_GREY = '#c3c2b7'     # flagged sections, so shape carries the meaning not colour
+INK, INK_2, INK_3 = '#111111', '#52514e', '#8a8984'
 FRAME, GRID, SURFACE = '#222222', '#D9D9D9', '#FFFFFF'
 BOX_EDGE, BOX_ALPHA = '#7A7A7A', 0.22
 BORDER_LW, TICK_LW, BOX_LW = 0.75, 0.55, 0.60
-MARK_SIZE, MARK_EDGE = 6.5, 0.85
-AXIS_TEXT, AXIS_TITLE, LEGEND_TEXT, STAR_TEXT = 10.0, 11.5, 10.0, 12.0
-PANEL_TITLE = 13.0
-
-# specimen ids carry a capital P for pig; the human cases are AJK*
-SPECIES = (('A. Pig', lambda s: 'P' in s), ('B. Human', lambda s: 'P' not in s))
-
-# Dropped from the figure and from every statistic. The measurement is a mean of
-# per-pixel ratios, and on this section 98% of foreground pixels sit at exactly zero
-# in MYL4 -- see EXCLUSIONS.md beside this file.
-EXCLUDED = ('AJKY121-8-2',)
-
-# Previously held sections drawn in grey and kept in the statistics. Emptied:
-# greying a point asks the reader to discount it while still counting it. A
-# section now either measures or is excluded by name.
-MARKED = {}
-
-DODGE, BOX_WIDTH = 0.52, 0.30
-OVERLAP = 0.40        # adjacent fanned points overlap by this much of a marker
+MARK_SIZE, MARK_EDGE = 5.5, 0.75
+AXIS_TEXT, AXIS_TITLE, LEGEND_TEXT = 10.0, 11.5, 10.0
+PANEL_TITLE, TABLE_TEXT = 13.0, 8.6
+DODGE, BOX_WIDTH, OVERLAP = 0.185, 0.155, 0.40
 
 # fonttype 42 embeds TrueType rather than converting glyphs to paths
-matplotlib.rcParams.update({
-    'font.family': 'sans-serif',
-    'pdf.fonttype': 42,
-    'ps.fonttype': 42,
-    'svg.fonttype': 'none',
-})
+matplotlib.rcParams.update({'font.family': 'sans-serif', 'pdf.fonttype': 42,
+                            'ps.fonttype': 42, 'svg.fonttype': 'none'})
 
 
-LOA_Z = 1.96          # 95% limits of agreement
+# ---------------------------------------------------------------------------
+# Statistics
+# ---------------------------------------------------------------------------
 
+def bland_altman(reference, test, z=LOA_Z):
+    """bias +/- z*SD of the paired differences, in units of rho.
 
-def bland_altman(gt, pred):
-    """Bias and 95% limits of agreement for a paired difference.
-
-    Absolute, in the units of the measurement, so two bands with different
-    spreads stay comparable -- which is the property CCC gives up.
+    Local because statsmodels only draws the plot and scipy has no equivalent.
+    These are limits of agreement, not a CI: they say where an individual
+    section falls and do not narrow with n. z=1.96 assumes SD is known; at
+    n=8-11 the t form (2.31, 2.23) would widen them ~15%.
     """
-    d = gt - pred
+    d = np.asarray(reference, float) - np.asarray(test, float)
     bias, sd = float(d.mean()), float(d.std(ddof=1))
-    return bias, sd, bias - LOA_Z * sd, bias + LOA_Z * sd, float(np.abs(d).mean())
+    return {'bias': bias, 'sd_difference': sd,
+            'loa_lower': bias - z * sd, 'loa_upper': bias + z * sd,
+            'mean_abs_difference': float(np.abs(d).mean())}
 
 
-def offsets(values, span, tol):
-    """Fan colliding points sideways, alternating about the centre. Points
-    within `tol` in y would overplot, so each takes the next free slot. No
-    jitter, so the figure is identical on every run."""
-    out = np.zeros(len(values))
-    order = np.argsort(values, kind='stable')
-    group = []
-    for idx in order:
+def correlation(reference, test):
+    """Pearson r: whether the arm tracks between-slide variation.
+
+    Blind to offset and scale, so never agreement on its own. The p-value tests
+    r != 0, which is not a claim this figure makes -- CSV only, off the plot.
+    """
+    r, p = pearsonr(np.asarray(reference, float), np.asarray(test, float))
+    return {'pearson_r': float(r), 'pearson_p': float(p)}
+
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+
+def load(path, arms):
+    """{band: {arm: {slide: rho}}}, from quantify_density.py's CSV."""
+    out = defaultdict(lambda: defaultdict(dict))
+    with open(path, newline='', encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            if r['arm'] in arms:
+                out[r['band']][r['arm']][r['slide']] = float(r['rho_px'])
+    return out
+
+
+def agreement(data, slides, species, arms):
+    """One record per (species, band, arm), against the annotation."""
+    out = []
+    for band in BANDS:
+        v = {a: np.array([data[band][a][s] for s in slides]) for a, *_ in arms}
+        for arm, *_ in arms:
+            if arm == GT:
+                continue
+            out.append({'species': species, 'band': band, 'arm': arm,
+                        'n': len(slides), 'gt_mean': float(v[GT].mean()),
+                        'arm_mean': float(v[arm].mean()),
+                        **bland_altman(v[GT], v[arm]),
+                        **correlation(v[GT], v[arm])})
+    return out
+
+
+def depth_span(data, slides):
+    """Annotation's near minus deep mean rho: the range the measurement covers
+    across depth. A reference point, never a denominator -- it moves with the
+    band edges and differs by species."""
+    near, deep = list(BANDS)[0], list(BANDS)[-1]
+    return float(np.mean([data[near][GT][s] for s in slides])
+                 - np.mean([data[deep][GT][s] for s in slides]))
+
+
+# ---------------------------------------------------------------------------
+# Drawing
+# ---------------------------------------------------------------------------
+
+def fan(values, span, tol):
+    """Spread colliding points sideways about the centre. No jitter, so the
+    figure is identical on every run."""
+    out, group = np.zeros(len(values)), []
+    for idx in np.argsort(values, kind='stable'):
         if group and values[idx] - values[group[0]] > tol:
             group = []
-        # slots run 0, +1, -1, +2, -2, ... so a cluster stays centred
         k = len(group)
         out[idx] = span * ((k + 1) // 2) * (1 if k % 2 else -1) if k else 0.0
         group.append(idx)
     return out
 
 
-def load(path):
-    """{band: {arm: {slide: rho}}}, from quantify_density.py's CSV."""
-    out = defaultdict(lambda: defaultdict(dict))
-    for r in csv.DictReader(open(path)):
-        out[r['band']][r['arm']][r['slide']] = float(r['rho_px'])
-    return out
-
-
-def panel(ax, ax_title, data, slides, lo, hi):
-    """One species: dodged boxes per band, points fanned, bracket and stars."""
-    rows, groups = [], []
-    for i, band in enumerate(BANDS):
-        paired = {arm: np.array([data[band][arm][s] for s in slides])
-                  for arm, *_ in ARMS}
-        for j, (arm, _, colour, marker) in enumerate(ARMS):
-            x = i + (j - 0.5) * DODGE
+def draw_boxes(ax, title, data, slides, ylim, arms):
+    """One species panel. Returns the point sets, which can only be fanned once
+    the axes has its final size."""
+    groups = []
+    for i, band in enumerate(PLOTTED):
+        for j, (arm, _, colour, marker) in enumerate(arms):
+            v = np.array([data[band][arm][s] for s in slides])
+            x = i + (j - (len(arms) - 1) / 2) * DODGE
             # whiskers to the extremes: every point is drawn, so a 1.5 IQR
             # whisker would leave points stranded outside it
-            bp = ax.boxplot([paired[arm]], positions=[x], widths=BOX_WIDTH,
-                            whis=(0, 100), showfliers=False, patch_artist=True,
-                            manage_ticks=False)
+            bp = ax.boxplot([v], positions=[x], widths=BOX_WIDTH, whis=(0, 100),
+                            showfliers=False, patch_artist=True, manage_ticks=False)
             for part in ('whiskers', 'caps', 'medians', 'boxes'):
                 for artist in bp[part]:
                     artist.set(color=BOX_EDGE, linewidth=BOX_LW)
             bp['boxes'][0].set(facecolor=colour, alpha=BOX_ALPHA, edgecolor=BOX_EDGE)
-            groups.append((x, paired[arm], colour, marker, slides))
+            groups.append((x, v, colour, marker))
 
-        bias, sd, loa_lo, loa_hi, mad = bland_altman(paired['ground truth'],
-                                                     paired['predicted'])
-        # every section, marked ones included: a marker identifies them, it does
-        # not remove them from the statistic
-        rows.append({'species': ax_title.split('. ')[1], 'band': band,
-                     'n': len(slides),
-                     'gt_mean': paired['ground truth'].mean(),
-                     'pred_mean': paired['predicted'].mean(),
-                     'bias': bias, 'sd_difference': sd,
-                     'loa_lower': loa_lo, 'loa_upper': loa_hi,
-                     'loa_width': loa_hi - loa_lo,
-                     'mean_abs_difference': mad})
-
-    # near band minus deep band ON THE ANNOTATION: the effect the error is
-    # judged against has to be a property of the biology, not of the arm
-    effect = rows[0]['gt_mean'] - rows[-1]['gt_mean']
-    for r in rows:
-        r['effect'] = effect
-        r['pct_of_effect'] = 100 * r['mean_abs_difference'] / effect if effect else float('nan')
-
-    pad = 0.10 * (hi - lo)
-    y = hi + 0.45 * pad
-    for i, r in enumerate(rows):
-        ax.text(i, y, f"bias {r['bias']:+.3f}\n95% LoA ±{LOA_Z * r['sd_difference']:.3f}",
-                ha='center', va='bottom', fontsize=STAR_TEXT - 2.0, color=INK_2,
-                linespacing=1.4)
-
-    ax.set_xticks(range(len(BANDS)))
-    ax.set_xticklabels(LABELS, fontsize=AXIS_TITLE, color=INK)
+    ax.set_xticks(range(len(PLOTTED)))
+    ax.set_xticklabels([BANDS[b] for b in PLOTTED], fontsize=AXIS_TITLE, color=INK)
     ax.tick_params(axis='x', length=0, pad=8)
     ax.tick_params(axis='y', labelsize=AXIS_TEXT, colors=INK, color=FRAME,
                    width=TICK_LW, length=5)
-    ax.set_xlim(-0.65, len(BANDS) - 0.35)
-    ax.set_ylim(lo - pad, hi + 1.9 * pad)
+    ax.set_xlim(-0.62, len(PLOTTED) - 0.38)
+    ax.set_ylim(*ylim)
     for sp in ax.spines.values():
         sp.set(visible=True, color=FRAME, linewidth=BORDER_LW)
     ax.grid(axis='y', color=GRID, lw=0.5)
     ax.set_axisbelow(True)
-    ax.set_title(f'{ax_title}  (n = {len(slides)})', fontsize=PANEL_TITLE, color=INK,
-                 pad=12, loc='left', fontweight='bold')
-    return rows, groups
+    ax.set_title(f'{title}  (n = {len(slides)})', fontsize=PANEL_TITLE, color=INK,
+                 pad=10, loc='left', fontweight='bold')
+    return groups
 
 
 def draw_points(ax, groups):
-    """Fanned last: spacing points by marker size needs the final axes size."""
     box = ax.get_window_extent()
     per_pt = ax.figure.dpi / 72.0
-    dx = (ax.get_xlim()[1] - ax.get_xlim()[0]) / (box.width / per_pt)
-    dy = (ax.get_ylim()[1] - ax.get_ylim()[0]) / (box.height / per_pt)
-    for x, v, colour, marker, slides in groups:
-        xs = x + offsets(v, (1 - OVERLAP) * MARK_SIZE * dx, MARK_SIZE * dy)
-        # flagged sections keep their place in the fan but carry their own
-        # marker, so they are identifiable without being removed
-        plain = [i for i, s in enumerate(slides) if s not in MARKED]
-        ax.plot(xs[plain], v[plain], linestyle='none', marker=marker,
-                markersize=MARK_SIZE, markerfacecolor=colour,
-                markeredgecolor='black', markeredgewidth=MARK_EDGE, zorder=3)
-        for i, s in enumerate(slides):
-            if s in MARKED:
-                ax.plot([xs[i]], [v[i]], linestyle='none', marker=MARKED[s][0],
-                        markersize=MARK_SIZE * 1.9, markerfacecolor=FLAG_GREY,
-                        markeredgecolor='black', markeredgewidth=MARK_EDGE,
-                        zorder=4)
+    dx = np.diff(ax.get_xlim())[0] / (box.width / per_pt)
+    dy = np.diff(ax.get_ylim())[0] / (box.height / per_pt)
+    for x, v, colour, marker in groups:
+        ax.plot(x + fan(v, (1 - OVERLAP) * MARK_SIZE * dx, MARK_SIZE * dy), v,
+                linestyle='none', marker=marker, markersize=MARK_SIZE,
+                markerfacecolor=colour, markeredgecolor='black',
+                markeredgewidth=MARK_EDGE, zorder=3)
 
+
+def draw_table(ax, rows, arms, spans):
+    """Panel C. Rows laid out from an index, so a group rule is the midpoint
+    between two known row positions and cannot land on text."""
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_title('C. Agreement with the annotation', fontsize=PANEL_TITLE,
+                 color=INK, pad=10, loc='left', fontweight='bold')
+
+    metrics = (('bias', lambda r: f"{r['bias']:+.3f}"),
+               ('95% LoA ±', lambda r: f"{LOA_Z * r['sd_difference']:.3f}"),
+               ("Pearson's r", lambda r: f"{r['pearson_r']:+.2f}"))
+    compare = [a for a in arms if a[0] != GT]
+    species = [s for s, _ in SPECIES]
+    record = {(r['species'], r['band'], r['arm']): r for r in rows}
+    n_of = {r['species']: r['n'] for r in rows}
+
+    X_BAND, X_ARM, X0, STEP = 0.005, 0.145, 0.400, 0.098
+    TOP, DY, GAP = 0.845, 0.058, 0.040
+    xs = [X0 + k * STEP for k in range(len(species) * len(metrics))]
+    right = xs[-1] + 0.012
+
+    def y_of(i):
+        return TOP - (i + 1) * DY - (i // len(compare)) * GAP
+
+    for si, sp in enumerate(species):
+        lo = xs[si * len(metrics)] - 0.052
+        hi = xs[si * len(metrics) + len(metrics) - 1] + 0.012
+        ax.text((lo + hi) / 2, TOP + 0.090, f'{sp}  (n = {n_of[sp]})',
+                fontsize=TABLE_TEXT + 1.0, color=INK, ha='center', fontweight='bold')
+        ax.plot([lo, hi], [TOP + 0.070] * 2, color=FRAME, lw=0.7, clip_on=False)
+    for k, (label, _) in enumerate(metrics * len(species)):
+        ax.text(xs[k], TOP + 0.016, label, fontsize=TABLE_TEXT, color=INK_2, ha='right')
+    ax.plot([X_BAND, right], [TOP] * 2, color=FRAME, lw=0.7, clip_on=False)
+
+    for bi, band in enumerate(BANDS):
+        for ai, (arm, label, colour, marker) in enumerate(compare):
+            y = y_of(bi * len(compare) + ai)
+            if ai == 0:
+                ax.text(X_BAND, y, BANDS[band], fontsize=TABLE_TEXT, color=INK,
+                        fontweight='bold')
+            ax.plot([X_ARM - 0.024], [y + 0.012], linestyle='none', marker=marker,
+                    markersize=MARK_SIZE - 0.5, markerfacecolor=colour,
+                    markeredgecolor='black', markeredgewidth=MARK_EDGE, clip_on=False)
+            ax.text(X_ARM, y, label, fontsize=TABLE_TEXT, color=INK)
+            for si, sp in enumerate(species):
+                r = record[(sp, band, arm)]
+                for k, (_, fmt) in enumerate(metrics):
+                    ax.text(xs[si * len(metrics) + k], y, fmt(r),
+                            fontsize=TABLE_TEXT, color=INK, ha='right')
+        if bi + 1 < len(BANDS):
+            last = y_of(bi * len(compare) + len(compare) - 1)
+            nxt = y_of((bi + 1) * len(compare))
+            ax.plot([X_BAND, right], [(last + nxt) / 2] * 2, color=GRID, lw=0.6,
+                    clip_on=False)
+
+    ax.text(X_BAND, y_of(len(BANDS) * len(compare) - 1) - 0.055,
+            'bias = mean(annotation − arm)   ·   '
+            '95% LoA = bias ± 1.96 SD, where an individual section falls   ·   '
+            "Pearson's r is across sections and blind to offset   ·   "
+            'depth span of the annotation (near − deep): '
+            + ',  '.join(f'{s} {v:.3f}' for s, v in spans.items()),
+            fontsize=TABLE_TEXT - 1.2, color=INK_3)
+
+
+# ---------------------------------------------------------------------------
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--density', default=str(HERE / 'density.csv'))
     ap.add_argument('--out', default=str(HERE / 'density-by-depth.pdf'))
     ap.add_argument('--stats', default=str(HERE / 'density_statistics.csv'))
-    ap.add_argument('--exclude', nargs='*', default=EXCLUDED,
-                    help='sections to drop; pass with no names to keep all')
+    ap.add_argument('--arms', nargs='*', default=[a for a, *_ in ARMS])
+    ap.add_argument('--exclude', nargs='*', default=EXCLUDED)
     a = ap.parse_args()
 
-    data = load(a.density)
-    everything = [s for s in sorted(data[BANDS[0]]['ground truth'])
-                  if s not in a.exclude]
-    if a.exclude:
-        print('excluded: ' + ', '.join(a.exclude))
+    arms = tuple(x for x in ARMS if x[0] in a.arms or x[0] == GT)
+    data = load(a.density, {x[0] for x in arms})
+    missing = [x[0] for x in arms if not data[list(BANDS)[0]].get(x[0])]
+    if missing:
+        raise SystemExit(f'{a.density} has no rows for: {", ".join(missing)}')
+    slides = sorted(set.intersection(*[set(data[b][arm]) for b in BANDS
+                                       for arm, *_ in arms]) - set(a.exclude))
+    print(f'excluded: {", ".join(a.exclude) or "none"}   n = {len(slides)}   '
+          f'arms: {", ".join(x[0] for x in arms)}')
+
+    by_species = {name: [s for s in slides if belongs(s)] for name, belongs in SPECIES}
+    rows, spans = [], {}
+    for name, members in by_species.items():
+        if not members:
+            raise SystemExit(f'no slides matched {name}')
+        rows += agreement(data, members, name, arms)
+        spans[name] = depth_span(data, members)
+
     # one pair of limits for both panels, so the species are read against the
     # same scale rather than each being re-zoomed to its own range
-    kept = [data[b][arm][s] for b in BANDS for arm, *_ in ARMS for s in everything]
-    lo, hi = min(kept), max(kept)
+    plotted = [data[b][arm][s] for b in PLOTTED for arm, *_ in arms for s in slides]
+    pad = 0.10 * (max(plotted) - min(plotted))
+    ylim = (min(plotted) - pad, max(plotted) + pad)
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.6, 5.6), sharey=True)
+    fig = plt.figure(figsize=(12.2, 10.0))
     fig.patch.set_facecolor(SURFACE)
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], hspace=0.28, wspace=0.07)
+    axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])]
+    axes[1].sharey(axes[0])
 
-    rows, pending = [], []
-    for ax, (title, belongs) in zip(axes, SPECIES):
+    pending = []
+    for ax, (name, _) in zip(axes, SPECIES):
         ax.set_facecolor(SURFACE)
-        slides = [s for s in everything if belongs(s)]
-        if not slides:
-            raise SystemExit(f'no slides matched {title}')
-        r, g = panel(ax, title, data, slides, lo, hi)
-        rows += r
-        pending.append((ax, g))
-
-    fig.supylabel('Per-pixel MYL4 share of section intensity  $\\rho$',
-                  fontsize=AXIS_TITLE, color=INK)
-    fig.supxlabel('Depth into myocardium', fontsize=AXIS_TITLE, color=INK)
+        pending.append((ax, draw_boxes(ax, f'{"AB"[len(pending)]}. {name}', data,
+                                       by_species[name], ylim, arms)))
+        ax.set_xlabel('Depth into myocardium', fontsize=AXIS_TITLE, color=INK,
+                      labelpad=6)
     axes[1].tick_params(left=False, labelleft=False)
-    handles = [Line2D([], [], linestyle='none', marker=m, markersize=MARK_SIZE,
-                      markerfacecolor=c, markeredgecolor='black',
-                      markeredgewidth=MARK_EDGE) for _, _, c, m in ARMS]
-    labels = [label for _, label, _, _ in ARMS]
-    for marker, note in MARKED.values():
-        handles.append(Line2D([], [], linestyle='none', marker=marker,
-                              markersize=MARK_SIZE * 1.5, markerfacecolor=FLAG_GREY,
-                              markeredgecolor='black', markeredgewidth=MARK_EDGE))
-        labels.append(note)
-    fig.legend(handles, labels, loc='upper center', ncol=len(handles),
+    axes[0].set_ylabel('Per-pixel MYL4 share of section intensity  $\\rho$',
+                       fontsize=AXIS_TITLE, color=INK)
+
+    fig.legend([Line2D([], [], linestyle='none', marker=m, markersize=MARK_SIZE + 1.5,
+                       markerfacecolor=c, markeredgecolor='black',
+                       markeredgewidth=MARK_EDGE) for _, _, c, m in arms],
+               [l for _, l, _, _ in arms], loc='upper center', ncol=len(arms),
                frameon=False, fontsize=LEGEND_TEXT, labelcolor=INK,
-               bbox_to_anchor=(0.5, 0.99))
+               bbox_to_anchor=(0.5, 0.985))
 
-    fig.tight_layout(rect=(0.01, 0.02, 1, 0.93))
+    draw_table(fig.add_subplot(gs[1, :]), rows, arms, spans)
+    # explicit margins: panel C is positioned text, which tight_layout cannot
+    # measure -- it warns and then guesses
+    fig.subplots_adjust(left=0.085, right=0.985, top=0.925, bottom=0.025)
     fig.canvas.draw()
-    for ax, g in pending:
-        draw_points(ax, g)
+    for ax, groups in pending:
+        draw_points(ax, groups)
+    fig.savefig(a.out, facecolor=SURFACE, bbox_inches='tight')
+    print(f'wrote {a.out}')
 
-    out = Path(a.out).with_suffix('.pdf')
-    fig.savefig(out, facecolor=SURFACE, bbox_inches='tight')
-    print(f'wrote {out}')
-
-    with open(a.stats, 'w', newline='') as f:
+    with open(a.stats, 'w', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
     print(f'wrote {a.stats}\n')
-    print(f"  {'species':<8}{'band':<12}{'n':>3}{'gt':>9}{'pred':>9}{'bias':>10}"
-          f"{'95% LoA':>20}{'width':>9}{'mean|d|':>9}{'% effect':>10}")
+    print(f"  {'species':<8}{'band':<12}{'arm':<18}{'gt':>8}{'arm':>8}"
+          f"{'bias':>9}{'LoA ±':>9}{'mean|d|':>9}{'r':>8}")
     for r in rows:
-        print(f"  {r['species']:<8}{r['band']:<12}{r['n']:>3}{r['gt_mean']:>9.4f}"
-              f"{r['pred_mean']:>9.4f}{r['bias']:>+10.4f}"
-              f"{r['loa_lower']:>+10.4f},{r['loa_upper']:>+9.4f}"
-              f"{r['loa_width']:>9.4f}{r['mean_abs_difference']:>9.4f}"
-              f"{r['pct_of_effect']:>9.0f}%")
-    print(f"\n  Excluded: {', '.join(a.exclude) if a.exclude else 'none'}. "
-          '% effect is the mean absolute difference against\n  '
-          "the annotation's own near-minus-deep span: "
-          + '  '.join(f"{r['species']} {r['effect']:.4f}"
-                      for r in rows if r['band'] == BANDS[0]))
+        print(f"  {r['species']:<8}{r['band']:<12}{r['arm']:<18}{r['gt_mean']:>8.4f}"
+              f"{r['arm_mean']:>8.4f}{r['bias']:>+9.4f}"
+              f"{LOA_Z * r['sd_difference']:>9.4f}{r['mean_abs_difference']:>9.4f}"
+              f"{r['pearson_r']:>+8.2f}")
+    print('\n  depth span: ' + ',  '.join(f'{s} {v:.4f}' for s, v in spans.items()))
 
 
 if __name__ == '__main__':
