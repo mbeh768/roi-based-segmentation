@@ -286,7 +286,7 @@ def main():
         ax.set_xlabel('Depth into myocardium', fontsize=AXIS_TITLE, color=INK,
                       labelpad=6)
     axes[1].tick_params(left=False, labelleft=False)
-    axes[0].set_ylabel('Per-pixel MYL4 share of section intensity  $\\rho$',
+    axes[0].set_ylabel('Relative MYL4 intensity  $\\rho$',
                        fontsize=AXIS_TITLE, color=INK)
 
     fig.legend([Line2D([], [], linestyle='none', marker=m, markersize=MARK_SIZE + 1.5,
