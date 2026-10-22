@@ -70,8 +70,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--baseline', default=str(ROOT / 'figures-for-pub' / 'model-baseline'
                                               / 'k-fold-bnaug-2026-10-17_slide_metrics.json'))
-    ap.add_argument('--ablation', default=str(HERE / 'roi-ablation-noise-2026-09-03'
-                                                     '_slide_metrics.json'))
+    ap.add_argument('--ablation', required=True)
     ap.add_argument('--out', default=str(HERE / 'roi-ablation.pdf'))
     a = ap.parse_args()
 
