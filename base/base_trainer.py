@@ -1,3 +1,6 @@
+# Adapted from victoresque/pytorch-template (MIT License).
+# See LICENSES/pytorch-template-LICENSE.
+
 import torch
 from abc import abstractmethod
 from numpy import inf

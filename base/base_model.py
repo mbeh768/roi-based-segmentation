@@ -1,3 +1,6 @@
+# Adapted from victoresque/pytorch-template (MIT License).
+# See LICENSES/pytorch-template-LICENSE.
+
 import torch.nn as nn
 import numpy as np
 from abc import abstractmethod

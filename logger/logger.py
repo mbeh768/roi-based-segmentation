@@ -1,3 +1,6 @@
+# Adapted from victoresque/pytorch-template (MIT License).
+# See LICENSES/pytorch-template-LICENSE.
+
 import logging
 import logging.config
 from pathlib import Path

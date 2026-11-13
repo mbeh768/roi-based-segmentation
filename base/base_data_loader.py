@@ -1,3 +1,6 @@
+# Adapted from victoresque/pytorch-template (MIT License).
+# See LICENSES/pytorch-template-LICENSE.
+
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 
