@@ -18,6 +18,8 @@ SHORT = {'predicted': 'Predicted', 'SAM': 'SAM', 'microSAM': 'microSAM',
 # rings() builds the top band as dist >= 200, so the source label understates it
 BANDS = {'0-99 um': '0-99 um', '100-199 um': '100-199 um', '>200 um': '>=200 um'}
 MARKED = ('AJKY121-8-2',)        # excluded from the figure; see EXCLUSIONS.md
+# the delivered filename drops the V that its paired half carries
+RENAME = {'AJK056-10-2of2': 'AJKV056-10-2of2'}
 
 
 def species(slide):
@@ -49,7 +51,7 @@ def tex_band(label):
     return s.replace('-', '--')
 
 
-def write_tex(path, recs, others, caption_cols):
+def write_tex(path, recs, others):
     esc = lambda s: s.replace('_', r'\_')
     n = 3 + len(others)
     head = ('\\toprule\n'
@@ -65,9 +67,9 @@ def write_tex(path, recs, others, caption_cols):
            f'*{{{len(others)}}}{{S[table-format=+1.4, retain-explicit-plus]}}@{{}}}}',
            r'\caption{Extended quantification results per slide and depth band. GT is '
            r'the ground-truth density; the remaining columns give each method'
-           r"'s difference from GT. " + caption_cols +
-           r' \textsuperscript{*}Slide excluded from the original analysis.}'
-           r'\label{tab:density_deltas} \\',
+           r"'s difference from GT. A slide excluded from the main analysis is "
+           r'marked with a star (*).}'
+           r'\label{tab:density-deltas} \\',
            head, r'\endfirsthead',
            f'\\multicolumn{{{n}}}{{@{{}}l}}{{\\textit{{Table \\thetable\\ continued}}}} \\\\',
            head, r'\endhead', r'\midrule',
@@ -101,7 +103,8 @@ def main():
     rho = defaultdict(dict)
     with open(a.density, newline='', encoding='utf-8') as f:
         for r in csv.DictReader(f):
-            rho[(r['band'], r['slide'])][r['arm']] = float(r[a.value])
+            slide = RENAME.get(r['slide'], r['slide'])
+            rho[(r['band'], slide)][r['arm']] = float(r[a.value])
     assert {b for b, _ in rho} <= set(BANDS), 'unknown band in density.csv'
 
     others = [x for x in ARMS[1:] if any(x in v for v in rho.values())]
@@ -125,9 +128,7 @@ def main():
     print(f'wrote {a.out}  ({len(recs)} rows)')
 
     if a.tex:
-        legend = ' '.join(f"{SHORT[x]}: ({x.replace(' - ', ' $-$ ')}) $-$ GT."
-                          for x in others if ' ' in x)
-        write_tex(a.tex, recs, others, legend)
+        write_tex(a.tex, recs, others)
 
 
 if __name__ == '__main__':

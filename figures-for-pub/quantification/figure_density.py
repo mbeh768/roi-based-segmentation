@@ -34,7 +34,7 @@ ARMS = (('ground truth',     'Ground truth',          '#2B8CBE', 'o'),
 GT = 'ground truth'
 # keys match density.csv; rings() builds the top band as dist >= 200, so the
 # label is an inequality the source string understates
-BANDS = {'0-99 um': '0–99 µm', '100-199 um': '100–199 µm', '>200 um': '≥200 µm'}
+BANDS = {'0-99 um': '0–99µm', '100-199 um': '100–199µm', '>200 um': '≥200µm'}
 PLOTTED = ['0-99 um', '100-199 um']
 # specimen ids carry a capital P for pig; the human cases are AJK*
 SPECIES = (('Pig', lambda s: 'P' in s), ('Human', lambda s: 'P' not in s))
@@ -46,8 +46,9 @@ FRAME, GRID, SURFACE = '#222222', '#D9D9D9', '#FFFFFF'
 BOX_EDGE, BOX_ALPHA = '#7A7A7A', 0.22
 BORDER_LW, TICK_LW, BOX_LW = 0.75, 0.55, 0.60
 MARK_SIZE, MARK_EDGE = 5.5, 0.75
-AXIS_TEXT, AXIS_TITLE, LEGEND_TEXT = 15.0, 17.2, 20.0
-PANEL_TITLE, TABLE_TEXT = 17.2, 17.2
+# the figure is placed at 0.8\textwidth, so printed point size is ~0.41 of these
+AXIS_TEXT, AXIS_TITLE, LEGEND_TEXT = 20.0, 22.0, 20.0
+PANEL_TITLE, TABLE_TEXT = 22.0, 18.0
 DODGE, BOX_WIDTH, OVERLAP = 0.185, 0.155, 0.40
 
 # fonttype 42 embeds TrueType rather than converting glyphs to paths
@@ -144,7 +145,7 @@ def draw_boxes(ax, title, data, slides, ylim, arms):
             groups.append((x, v, colour, marker))
 
     ax.set_xticks(range(len(PLOTTED)))
-    ax.set_xticklabels([BANDS[b] for b in PLOTTED], fontsize=AXIS_TITLE, color=INK)
+    ax.set_xticklabels([BANDS[b] for b in PLOTTED], fontsize=AXIS_TEXT, color=INK)
     ax.tick_params(axis='x', length=0, pad=8)
     ax.tick_params(axis='y', labelsize=AXIS_TEXT, colors=INK, color=FRAME,
                    width=TICK_LW, length=5)
@@ -171,17 +172,24 @@ def draw_points(ax, groups):
                 markeredgewidth=MARK_EDGE, zorder=3)
 
 
+def signed(v):
+    """Signed to three decimals, but never -0.000, which reads as a typo."""
+    s = f'{v:+.3f}'
+    return s.lstrip('+-') if float(s) == 0 else s
+
+
 def draw_table(ax, rows, arms):
     """Panel (c). Rows laid out from an index, so a group rule is the midpoint
     between two known row positions and cannot land on text."""
     ax.set_axis_off()
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.set_title('(c) Agreement with the annotation', fontsize=PANEL_TITLE,
+    ax.set_title('(c) Agreement with the ground truth', fontsize=PANEL_TITLE,
                  color=INK, pad=10, loc='left', fontweight='bold')
 
     metrics = (('Bias [95% CI]',
-                lambda r: f"{r['bias']:+.3f}  [{r['ci_lower']:+.3f}, {r['ci_upper']:+.3f}]"),
+                lambda r: f"{signed(r['bias'])} "
+                          f"[{signed(r['ci_lower'])}, {signed(r['ci_upper'])}]"),
                ('LoA ±', lambda r: f"{LOA_Z * r['sd_difference']:.3f}"))
     compare = [a for a in arms if a[0] != GT]
     species = [s for s, _ in SPECIES]
@@ -192,10 +200,10 @@ def draw_table(ax, rows, arms):
     # Column centres, with the spans they are centred in -- the bias cell is
     # 0.237 wide against a 0.136 header, so anchoring both on one edge would
     # leave the numbers off their title.
-    X_BAND, X_ARM = 0.005, 0.175
-    xs = [0.424, 0.599, 0.794, 0.969]
-    span = ((0.306, 0.630), (0.676, 1.000))
-    TOP, DY, GAP = 0.845, 0.058, 0.040
+    X_BAND, X_ARM = 0.005, 0.180
+    xs = [0.437, 0.607, 0.799, 0.969]
+    span = ((0.316, 0.638), (0.678, 1.000))
+    TOP, DY, GAP = 0.845, 0.060, 0.034
     right = span[-1][1]
 
     def y_of(i):
@@ -232,10 +240,10 @@ def draw_table(ax, rows, arms):
                     clip_on=False)
 
     ax.text((X_BAND + right) / 2, y_of(len(BANDS) * len(compare) - 1) - 0.055,
-            'bias = mean(arm − annotation)   ·   '
-            '95% CI on the bias = bias ± t·SD/√n   ·   '
-            '95% LoA = bias ± 1.96 SD',
-            fontsize=TABLE_TEXT - 2.2, color=INK_3, ha='center')
+            'bias = mean(method − ground truth)   ·   '
+            'CI = bias ± t·SD/√n   ·   '
+            'LoA = bias ± 1.96 SD',
+            fontsize=TABLE_TEXT - 1.0, color=INK_3, ha='center')
 
 
 # ---------------------------------------------------------------------------
