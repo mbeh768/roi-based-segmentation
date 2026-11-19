@@ -1,5 +1,5 @@
 """x = model with its ROI channel replaced by N(0,1) noise, y = same model with
-the drawn ROI, one point per slide. Mirror of roi-upsample/figure_roi_upsample.py:
+the ROI provided, one point per slide. Mirror of roi-upsample/figure_roi_upsample.py:
 that asks if the network adds to the ROI, this asks if the ROI adds to the
 network. Both arms keep roi_exclusion, so only the tensor the network sees differs.
 
@@ -20,7 +20,7 @@ ROOT = next(p for p in HERE.parents if (p / 'train.py').exists())
 SERIES, MISS = '#2B8CBE', '#FF7F0E'
 INK, FRAME, GRID, SURFACE = '#111111', '#222222', '#D9D9D9', '#FFFFFF'
 BORDER_LW, TICK_LW, MARK_SIZE, MARK_EDGE = 0.75, 0.55, 7.0, 0.85
-AXIS_TEXT, AXIS_TITLE, PANEL_TITLE, LEGEND_TEXT = 10.0, 11.5, 13.0, 10.0
+AXIS_TEXT, AXIS_TITLE, PANEL_TITLE, LEGEND_TEXT = 12.5, 14.4, 16.3, 12.5
 
 matplotlib.rcParams.update({'font.family': 'sans-serif', 'pdf.fonttype': 42,
                             'ps.fonttype': 42, 'svg.fonttype': 'none'})
@@ -37,8 +37,8 @@ def panel(ax, label, name, noise, real, lo):
     ax.grid(color=GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
     ax.plot([lo, hi], [lo, hi], color=FRAME, lw=0.9, alpha=0.8, zorder=1)
-    mid = lo + 0.62 * (hi - lo)
-    ax.text(mid, mid - 0.025 * (hi - lo), 'drawn ROI = noise', fontsize=AXIS_TEXT - 1,
+    mid = lo + 0.40 * (hi - lo)
+    ax.text(mid, mid - 0.025 * (hi - lo), 'ROI provided = noise', fontsize=AXIS_TEXT - 1,
             color=FRAME, rotation=45, rotation_mode='anchor', ha='center', va='top')
 
     up = real > noise
@@ -80,8 +80,8 @@ def main():
         print(f'  dropped, not in both: {", ".join(sorted(set(base) ^ set(abl)))}')
 
     col = lambda d, k: np.array([d[s][k] for s in stems], float)
-    panels = (('A. IoU Score', 'IoU', col(abl, 'iou'), col(base, 'iou')),
-              ('B. Dice Score', 'Dice', col(abl, 'dice'), col(base, 'dice')))
+    panels = (('(a) IoU Score', 'IoU', col(abl, 'iou'), col(base, 'iou')),
+              ('(b) Dice Score', 'Dice', col(abl, 'dice'), col(base, 'dice')))
     # a full 0.05 step below the data, not half: when `lo` lands on a multiple of
     # the 0.1 tick spacing the first tick sits on the spine and its label runs
     # into the neighbouring panel's last one
@@ -92,7 +92,7 @@ def main():
     for ax, args in zip(axes, panels):
         panel(ax, *args, lo)
     fig.supxlabel('ROI replaced by noise', fontsize=AXIS_TITLE, color=INK)
-    fig.supylabel('Drawn ROI', fontsize=AXIS_TITLE, color=INK)
+    fig.supylabel('ROI provided', fontsize=AXIS_TITLE, color=INK)
     axes[1].tick_params(left=False, labelleft=False)
     axes[1].legend(loc='lower right', frameon=False, fontsize=LEGEND_TEXT,
                    labelcolor=INK, handletextpad=0.4, borderaxespad=0.5)

@@ -62,7 +62,7 @@ BORDER_LW, TICK_LW = 0.75, 0.55       # panel.border / axis.ticks linewidths
 MARK_SIZE, MARK_EDGE = 7.0, 0.85      # geom_point size 3.2 / stroke 0.85
 
 GAP_PX = 10                            # separation between the two panels
-AXIS_TEXT, AXIS_TITLE, PANEL_TITLE, LEGEND_TEXT = 10.0, 11.5, 13.0, 10.0
+AXIS_TEXT, AXIS_TITLE, PANEL_TITLE, LEGEND_TEXT = 12.5, 14.4, 16.3, 12.5
 
 SHOW_CASE_NAMES = False
 
@@ -84,8 +84,8 @@ def main():
 
     rows = json.loads(Path(a.data).read_text())['slides']
     col = lambda k: np.array([r[k] for r in rows], float)
-    panels = (('A. IoU Score', 'IoU', col('roi'), col('model')),
-              ('B. Dice Score', 'Dice', col('roi_dice'), col('model_dice')))
+    panels = (('(a) IoU Score', 'IoU', col('roi'), col('model')),
+              ('(b) Dice Score', 'Dice', col('roi_dice'), col('model_dice')))
 
     # one pair of limits for both panels, so the two are read against the same
     # scale and Dice's compression toward 1 is visible rather than hidden by a
@@ -102,7 +102,7 @@ def main():
 
     # one label per axis for the pair, rather than repeating it under each panel
     fig.supxlabel('Upsampled ROI', fontsize=AXIS_TITLE, color=INK)
-    fig.supylabel('Model', fontsize=AXIS_TITLE, color=INK)
+    fig.supylabel('Predicted', fontsize=AXIS_TITLE, color=INK)
     # the panels share a scale, so the right one's ticks would only repeat the
     # left one's -- and at a 10 px gap they would land on top of it
     axes[1].tick_params(left=False, labelleft=False)
