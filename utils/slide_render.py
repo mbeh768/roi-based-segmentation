@@ -44,7 +44,9 @@ def load_slide_rgb(path, target=None, quiet=False):
         series = tif.series[0]
         axes, dtype = series.axes, series.dtype
 
-        if axes.startswith('C'):
+        # CYX does not imply one page per channel: some of these files hold all
+        # three in a single page, where pages[1] does not exist
+        if axes.startswith('C') and len(tif.pages) >= series.shape[0]:
             H, W = series.shape[1], series.shape[2]
             total, planes = 0.0, []
             for c in range(series.shape[0]):
@@ -57,6 +59,8 @@ def load_slide_rgb(path, target=None, quiet=False):
             mean = total / len(planes)
         else:
             arr = series.asarray()
+            if axes.startswith('C'):
+                arr = np.moveaxis(arr, 0, -1)
             H, W = arr.shape[:2]
             mean = float(arr.mean(dtype=np.float64))
             if target:

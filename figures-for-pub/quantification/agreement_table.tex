@@ -1,0 +1,38 @@
+\begin{table}[htbp]
+\centering
+\caption{Bland--Altman agreement of each method with the ground truth for relative MYL4 intensity $\rho_B$. Bias is the mean of (method $-$ ground truth) with its 95\% confidence interval; limits of agreement (LoA) are bias $\pm 1.96$~SD. Gradient retained is the mean of $\rho_{0\text{--}99} - \rho_{100\text{--}199}$ for each method as a percentage of that for the ground truth. Slide AJKY121-8-2 is excluded.}
+\label{tab:agreement}
+\setlength{\tabcolsep}{4pt}\small
+\medskip
+\begin{tabular}{@{}l ll ll@{}}
+\toprule
+ & \multicolumn{2}{c}{Pig (n = 11)} & \multicolumn{2}{c}{Human (n = 8)} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+Method & Bias [95\% CI] & LoA $\pm$ & Bias [95\% CI] & LoA $\pm$ \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{0--99 \si{\micro\meter}}} \\
+Predicted & $-0.017$ [$-0.033$, $-0.001$] & $0.046$ & $+0.001$ [$-0.004$, $+0.007$] & $0.014$ \\
+SAM & $-0.031$ [$-0.064$, $+0.003$] & $0.097$ & $-0.005$ [$-0.024$, $+0.014$] & $0.045$ \\
+$\mu$SAM & $-0.041$ [$-0.067$, $-0.015$] & $0.076$ & $-0.029$ [$-0.044$, $-0.014$] & $0.034$ \\
+ROI$-$FG & $-0.041$ [$-0.087$, $+0.005$] & $0.134$ & $-0.001$ [$-0.027$, $+0.026$] & $0.062$ \\
+\addlinespace
+\multicolumn{5}{@{}l}{\textit{100--199 \si{\micro\meter}}} \\
+Predicted & $-0.005$ [$-0.013$, $+0.002$] & $0.023$ & $+0.003$ [$+0.001$, $+0.006$] & $0.005$ \\
+SAM & $+0.005$ [$-0.009$, $+0.019$] & $0.041$ & $+0.017$ [$+0.008$, $+0.026$] & $0.021$ \\
+$\mu$SAM & $-0.002$ [$-0.009$, $+0.004$] & $0.018$ & $-0.001$ [$-0.008$, $+0.007$] & $0.018$ \\
+ROI$-$FG & $+0.002$ [$-0.018$, $+0.021$] & $0.057$ & $+0.014$ [$+0.008$, $+0.021$] & $0.016$ \\
+\addlinespace
+\multicolumn{5}{@{}l}{\textit{$\geq$200 \si{\micro\meter}}} \\
+Predicted & $0.000$ [$0.000$, $0.000$] & $0.000$ & $0.000$ [$0.000$, $0.000$] & $0.000$ \\
+SAM & $0.000$ [$0.000$, $+0.001$] & $0.001$ & $+0.001$ [$+0.001$, $+0.002$] & $0.001$ \\
+$\mu$SAM & $+0.001$ [$0.000$, $+0.002$] & $0.003$ & $+0.003$ [$+0.002$, $+0.003$] & $0.002$ \\
+ROI$-$FG & $0.000$ [$0.000$, $+0.001$] & $0.001$ & $+0.001$ [$0.000$, $+0.001$] & $0.001$ \\
+\addlinespace
+\multicolumn{5}{@{}l}{\textit{Gradient retained (\%)}} \\
+Predicted & \multicolumn{2}{c}{$71$} & \multicolumn{2}{c}{$94$} \\
+SAM & \multicolumn{2}{c}{$10$} & \multicolumn{2}{c}{$33$} \\
+$\mu$SAM & \multicolumn{2}{c}{$1$} & \multicolumn{2}{c}{$16$} \\
+ROI$-$FG & \multicolumn{2}{c}{$-9$} & \multicolumn{2}{c}{$55$} \\
+\bottomrule
+\end{tabular}
+\end{table}
