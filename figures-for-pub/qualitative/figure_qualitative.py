@@ -371,9 +371,8 @@ def draw_index(rows, where, a, path):
     fig.patch.set_facecolor(SURFACE)
     fig.text(0.06, 0.955, f'Supplementary {SUPP[a.arm]}: {ARM_LABEL[a.arm]}',
              fontsize=INDEX_PT + 3, color=INK, fontweight='bold', va='bottom')
-    fig.text(0.06, 0.935, f'{len(rows)} held-out slides, ordered by IoU. '
-             'Each entry links to its page.', fontsize=INDEX_PT - 1, color=INK_2,
-             va='bottom')
+    fig.text(0.06, 0.935, f'{len(rows)} held-out slides, ordered by IoU.',
+             fontsize=INDEX_PT - 1, color=INK_2, va='bottom')
 
     rects, W, H = {}, PAGE_W * 72.0, PAGE_H * 72.0
     for i, (stem, label, _img, _um) in enumerate(rows):
