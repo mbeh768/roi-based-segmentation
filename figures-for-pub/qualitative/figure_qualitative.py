@@ -77,15 +77,15 @@ def species(stem):
     return 'Human' if stem.startswith('AJK') else 'Pig'
 
 
-def um_per_canvas_px(stem, canvas_w):
-    """The canvas is the native image with its longest side scaled to canvas_w,
-    aspect preserved, so one canvas pixel is native_um * native_longest / W."""
+def um_per_panel_px(stem, panel_w):
+    """One panel pixel in microns, the unit scale_bar draws in: every panel is
+    fit() to panel_w wide, so it is panel_w-th of the native width."""
     um = (json.loads(VOXEL.read_text()).get(stem) or {}).get('um_per_px')
     hw = {s: v['native_hw'] for f in json.loads(METRICS.read_text())['folds']
           for s, v in f['per_slide'].items()}.get(stem)
     if not um or not hw:
         raise SystemExit(f'{stem}: need um_per_px and native_hw to size a bar')
-    return float(um) * max(hw) / canvas_w
+    return float(um) * hw[1] / panel_w
 
 
 def code_map(pred, gt, covered=None):
@@ -258,7 +258,7 @@ def main():
             label = (f'{stem} · {species(stem)} · IoU {score[stem]:.3f} '
                      f"with ROI, {float(n['iou']):.3f} with noise")
         rows.append((stem, label, row_image(panels),
-                     um_per_canvas_px(stem, d['image'].shape[1])))
+                     um_per_panel_px(stem, a.panel_px)))
 
     if a.figure == 'supp' and a.format == 'pdf':
         build_pdf(rows, heads, used, a)
@@ -371,7 +371,7 @@ def draw_index(rows, where, a, path):
     fig.patch.set_facecolor(SURFACE)
     fig.text(0.06, 0.955, f'Supplementary {SUPP[a.arm]}: {ARM_LABEL[a.arm]}',
              fontsize=INDEX_PT + 3, color=INK, fontweight='bold', va='bottom')
-    fig.text(0.06, 0.935, f'{len(rows)} held-out sections, ordered by IoU. '
+    fig.text(0.06, 0.935, f'{len(rows)} held-out slides, ordered by IoU. '
              'Each entry links to its page.', fontsize=INDEX_PT - 1, color=INK_2,
              va='bottom')
 
