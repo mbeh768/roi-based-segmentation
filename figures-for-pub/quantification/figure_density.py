@@ -200,10 +200,11 @@ def tex_label(label):
 
 def num(v, sign=True):
     """Three decimals in math mode, so the sign is a LaTeX minus. Never -0.000,
-    which reads as a typo once typeset."""
+    which reads as a typo once typeset -- but a dropped sign would shift the digits
+    out of line with the signed rows, so a zero keeps the sign's width instead."""
     s = f'{v:+.3f}' if sign else f'{v:.3f}'
     if sign and float(s) == 0:
-        s = s.lstrip('+-')
+        s = r'\phantom{+}' + s.lstrip('+-')
     return f'${s}$'
 
 
